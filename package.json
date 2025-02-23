@@ -1,0 +1,76 @@
+{
+  "name": "@yaacovcr/transform",
+  "version": "0.0.0",
+  "description": "A set of tools for transforming GraphQL results.",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "typesVersions": {
+    ">=4.4.0": {
+      "*": [
+        "*"
+      ]
+    }
+  },
+  "sideEffects": false,
+  "homepage": "https://github.com/yaacovCR/transform",
+  "bugs": {
+    "url": "https://github.com/yaacovCR/transform/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yaacovCR/transform.git"
+  },
+  "keywords": [
+    "graphql",
+    "transform",
+    "transformer",
+    "result",
+    "incrmeental"
+  ],
+  "engines": {
+    "node": "^18.14.0 || >=19.7.0"
+  },
+  "scripts": {
+    "test": "npm run lint && npm run check && npm run testonly && npm run prettier:check && npm run check:spelling",
+    "lint": "eslint --cache --max-warnings 0 .",
+    "check": "tsc --pretty",
+    "testonly": "mocha --full-trace src/**/__tests__/**/*-test.ts",
+    "testonly:cover": "c8 npm run testonly",
+    "testonly:watch": "npm run testonly -- --watch",
+    "prettier": "prettier --cache --cache-strategy metadata --write --list-different .",
+    "prettier:check": "prettier --cache --cache-strategy metadata --check .",
+    "check:spelling": "cspell --cache --no-progress \"**/*\"",
+    "build:npm:dual": "node --loader ts-node/esm resources/build-npm-dual.ts",
+    "build:npm:esm-only": "node --loader ts-node/esm resources/build-npm-esm-only.ts",
+    "build:deno": "node --loader ts-node/esm resources/build-deno.ts",
+    "diff:npm": "node --loader ts-node/esm resources/diff-npm-package.ts",
+    "changeset": "changeset add",
+    "changeset:version": "changeset version && npm install --package-lock-only",
+    "changeset:publish": "node --loader ts-node/esm resources/prepare-for-publish.ts && cd publishWorkspaceConfig && changeset publish"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.27.12",
+    "@types/chai": "5.0.1",
+    "@types/mocha": "10.0.10",
+    "@types/node": "22.13.1",
+    "c8": "10.1.3",
+    "chai": "5.1.2",
+    "cspell": "8.17.3",
+    "eslint": "^9.16.0",
+    "eslint-plugin-import": "2.31.0",
+    "eslint-plugin-n": "17.14.0",
+    "eslint-plugin-simple-import-sort": "12.1.1",
+    "mocha": "11.1.0",
+    "prettier": "3.5.0",
+    "ts-node": "10.9.2",
+    "typescript": "5.7.3",
+    "typescript-eslint": "^8.17.0"
+  },
+  "publishConfig": {
+    "tag": "alpha"
+  },
+  "dependencies": {
+    "graphql": "^17.0.0-alpha.8"
+  }
+}
