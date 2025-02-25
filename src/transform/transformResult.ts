@@ -19,17 +19,18 @@ import type { ObjMap } from '../jsutils/ObjMap.js';
 import type { Path } from '../jsutils/Path.js';
 import { addPath, pathToArray } from '../jsutils/Path.js';
 
-import { addNewDeferredFragments } from './addNewDeferredFragments.js';
 import type {
   EncounteredPendingResult,
   TransformationContext,
 } from './buildTransformationContext.js';
 import { isStream } from './buildTransformationContext.js';
-import { collectRootFields } from './collectFields.js';
-import { completeListValue, completeValue } from './completeValue.js';
+import {
+  completeInitialResult,
+  completeListValue,
+  completeObjectValue,
+} from './completeValue.js';
 import { embedErrors } from './embedErrors.js';
 import { getObjectAtPath } from './getObjectAtPath.js';
-import { inlineDefers } from './inlineDefers.js';
 import { mapAsyncIterable } from './mapAsyncIterable.js';
 
 export interface LegacyExperimentalIncrementalExecutionResults {
@@ -258,24 +259,14 @@ function processCompleted(
       const errors: Array<GraphQLError> = [];
 
       const { groupedFieldSetTree } = subsequentResultRecord.executionGroups[0];
-
-      const pathStr = pendingResult.pathStr;
-      const { groupedFieldSet, deferredFragmentDetails } = inlineDefers(
-        context,
-        groupedFieldSetTree,
-        pathStr,
-      );
-
-      addNewDeferredFragments(context, deferredFragmentDetails, pathStr);
-
       const objectPath = pathFromArray(pendingResult.path);
 
-      const data = completeValue(
+      const data = completeObjectValue(
         context,
-        object,
-        runtimeType,
-        groupedFieldSet,
         errors,
+        groupedFieldSetTree,
+        runtimeType,
+        object,
         objectPath,
       );
 
@@ -337,24 +328,7 @@ function transformInitialResult<
     processPending(context, pending);
   }
 
-  const groupedFieldSetTree = collectRootFields(transformedArgs, rootType);
-
-  const { groupedFieldSet, deferredFragmentDetails } = inlineDefers(
-    context,
-    groupedFieldSetTree,
-    '',
-  );
-
-  addNewDeferredFragments(context, deferredFragmentDetails, '');
-
-  const data = completeValue(
-    context,
-    originalData,
-    rootType,
-    groupedFieldSet,
-    errors,
-    undefined,
-  );
+  const data = completeInitialResult(context, originalData, rootType, errors);
 
   return (rest.errors ? { ...rest, errors, data } : { ...rest, data }) as T;
 }
