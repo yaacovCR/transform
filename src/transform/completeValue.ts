@@ -4,14 +4,7 @@ import type {
   GraphQLOutputType,
   ValidatedExecutionArgs,
 } from 'graphql';
-import {
-  getDirectiveValues,
-  GraphQLStreamDirective,
-  isLeafType,
-  isListType,
-  isNonNullType,
-  isObjectType,
-} from 'graphql';
+import { isLeafType, isListType, isNonNullType, isObjectType } from 'graphql';
 
 import { invariant } from '../jsutils/invariant.js';
 import { isObjectLike } from '../jsutils/isObjectLike.js';
@@ -21,8 +14,8 @@ import type { Path } from '../jsutils/Path.js';
 import { addPath, pathToArray } from '../jsutils/Path.js';
 
 import { addNewDeferredFragments } from './addNewDeferredFragments.js';
+import { addNewStreams } from './addNewStreams.js';
 import type { TransformationContext } from './buildTransformationContext.js';
-import { isStream } from './buildTransformationContext.js';
 import type { FieldDetails, GroupedFieldSetTree } from './collectFields.js';
 import {
   collectRootFields,
@@ -108,7 +101,7 @@ function completeValue(
       path,
     );
 
-    maybeAddStream(context, itemType, fieldDetailsList, path, result.length);
+    addNewStreams(context, itemType, fieldDetailsList, path, result.length);
 
     return completed;
   }
@@ -224,68 +217,4 @@ export function completeListValue(
   }
 
   return completedItems;
-}
-
-function maybeAddStream(
-  context: TransformationContext,
-  itemType: GraphQLOutputType,
-  fieldDetailsList: ReadonlyArray<FieldDetails>,
-  path: Path,
-  nextIndex: number,
-): void {
-  const pathStr = pathToArray(path).join('.');
-  const pendingLabels = context.pendingLabelsByPath.get(pathStr);
-  if (pendingLabels == null) {
-    return;
-  }
-
-  // for stream, there must be at most one pending label at this path
-  const pendingLabel = pendingLabels.values().next().value;
-  invariant(pendingLabel != null);
-
-  const originalStreamsByDeferLabel = new Map<
-    string | undefined,
-    {
-      originalLabel: string | undefined;
-      fieldDetailsList: Array<FieldDetails>;
-    }
-  >();
-  for (const fieldDetails of fieldDetailsList) {
-    const stream = getDirectiveValues(
-      GraphQLStreamDirective,
-      fieldDetails.node,
-      context.transformedArgs.variableValues,
-      fieldDetails.fragmentVariableValues,
-    );
-    if (stream != null) {
-      const label = stream.label;
-      invariant(typeof label === 'string');
-      const originalStreamLabel = context.originalLabels.get(label);
-      const deferLabel = fieldDetails.deferUsage?.label;
-      let originalStream = originalStreamsByDeferLabel.get(deferLabel);
-      if (originalStream === undefined) {
-        originalStream = {
-          originalLabel: originalStreamLabel,
-          fieldDetailsList: [],
-        };
-        originalStreamsByDeferLabel.set(deferLabel, originalStream);
-      }
-      originalStream.fieldDetailsList.push(fieldDetails);
-    }
-  }
-
-  const originalStreams = Array.from(originalStreamsByDeferLabel.values());
-  const key = pendingLabel + '.' + pathStr;
-  const streamForPendingLabel = context.subsequentResultRecords.get(key);
-  if (streamForPendingLabel == null) {
-    context.subsequentResultRecords.set(key, {
-      path,
-      itemType,
-      originalStreams,
-      nextIndex,
-    });
-  } else {
-    invariant(isStream(streamForPendingLabel));
-    streamForPendingLabel.originalStreams.push(...originalStreams);
-  }
 }
