@@ -139,7 +139,7 @@ function processIncremental(
   context: TransformationContext,
   incrementalResults: ReadonlyArray<IncrementalResult>,
 ): ReadonlyArray<LegacyIncrementalStreamResult> {
-  const pendingStreams = new Set<EncounteredPendingResult>();
+  const incremental: Array<LegacyIncrementalStreamResult> = [];
   for (const incrementalResult of incrementalResults) {
     const id = incrementalResult.id;
     const pendingResult = context.encounteredPendingResults.get(id);
@@ -151,11 +151,11 @@ function processIncremental(
     const incompleteAtPath = getObjectAtPath(context.mergedResult, path);
     if (Array.isArray(incompleteAtPath)) {
       invariant('items' in incrementalResult);
-      const items = incrementalResult.items as ReadonlyArray<unknown>;
-      const errors = incrementalResult.errors;
-      incompleteAtPath.push(...items);
-      embedErrors(context.mergedResult, errors);
-      pendingStreams.add(pendingResult);
+      incompleteAtPath.push(
+        ...(incrementalResult.items as ReadonlyArray<unknown>),
+      );
+      embedErrors(context.mergedResult, incrementalResult.errors);
+      onStreamItems(context, pendingResult, incremental);
     } else {
       invariant('data' in incrementalResult);
       for (const [key, value] of Object.entries(
@@ -166,32 +166,35 @@ function processIncremental(
       embedErrors(context.mergedResult, incrementalResult.errors);
     }
   }
-
-  const incremental: Array<LegacyIncrementalStreamResult> = [];
-  for (const pendingStream of pendingStreams) {
-    const stream = context.subsequentResultRecords.get(pendingStream.key);
-    invariant(stream != null);
-    invariant(isStream(stream));
-    const { originalStreams } = stream;
-    for (const originalStream of originalStreams) {
-      const { originalLabel, result, nextIndex } = originalStream;
-      const errors: Array<GraphQLError> = [];
-      const items = result(errors, nextIndex);
-      originalStream.nextIndex = nextIndex + items.length;
-      const newIncrementalResult: LegacyIncrementalStreamResult = {
-        items,
-        path: [...pendingStream.path, nextIndex],
-      };
-      if (errors.length > 0) {
-        newIncrementalResult.errors = errors;
-      }
-      if (originalLabel != null) {
-        newIncrementalResult.label = originalLabel;
-      }
-      incremental.push(newIncrementalResult);
-    }
-  }
   return incremental;
+}
+
+function onStreamItems(
+  context: TransformationContext,
+  pendingResult: EncounteredPendingResult,
+  incremental: Array<LegacyIncrementalResult>,
+): void {
+  const stream = context.subsequentResultRecords.get(pendingResult.key);
+  invariant(stream != null);
+  invariant(isStream(stream));
+  const { originalStreams } = stream;
+  for (const originalStream of originalStreams) {
+    const { originalLabel, result, nextIndex } = originalStream;
+    const errors: Array<GraphQLError> = [];
+    const items = result(errors, nextIndex);
+    originalStream.nextIndex = nextIndex + items.length;
+    const newIncrementalResult: LegacyIncrementalStreamResult = {
+      items,
+      path: [...pendingResult.path, nextIndex],
+    };
+    if (errors.length > 0) {
+      newIncrementalResult.errors = errors;
+    }
+    if (originalLabel != null) {
+      newIncrementalResult.label = originalLabel;
+    }
+    incremental.push(newIncrementalResult);
+  }
 }
 
 function processCompleted(
