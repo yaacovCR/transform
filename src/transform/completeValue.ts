@@ -154,15 +154,22 @@ export function completeObjectValue(
   originalData: ObjMap<unknown>,
   path: Path | undefined,
 ): ObjMap<unknown> {
-  const pathStr = pathToArray(path).join('.');
-
+  const pathArr = pathToArray(path);
+  const pathStr = pathArr.join('.');
   const { groupedFieldSet, deferredFragmentDetails } = inlineDefers(
     context,
     groupedFieldSetTree,
     pathStr,
   );
 
-  addNewDeferredFragments(context, deferredFragmentDetails, pathStr);
+  addNewDeferredFragments(
+    context,
+    deferredFragmentDetails,
+    runtimeType,
+    path,
+    pathArr,
+    pathStr,
+  );
 
   const {
     prefix,

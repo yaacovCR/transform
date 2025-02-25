@@ -6,7 +6,6 @@ import type {
   InitialIncrementalExecutionResult,
   SubsequentIncrementalExecutionResult,
 } from 'graphql';
-import { isObjectType } from 'graphql';
 import type {
   CompletedResult,
   PendingResult,
@@ -14,21 +13,15 @@ import type {
 } from 'graphql/execution/types.js';
 
 import { invariant } from '../jsutils/invariant.js';
-import { isObjectLike } from '../jsutils/isObjectLike.js';
 import type { ObjMap } from '../jsutils/ObjMap.js';
-import type { Path } from '../jsutils/Path.js';
-import { addPath, pathToArray } from '../jsutils/Path.js';
+import { pathToArray } from '../jsutils/Path.js';
 
 import type {
   EncounteredPendingResult,
   TransformationContext,
 } from './buildTransformationContext.js';
 import { isStream } from './buildTransformationContext.js';
-import {
-  completeInitialResult,
-  completeListValue,
-  completeObjectValue,
-} from './completeValue.js';
+import { completeInitialResult, completeListValue } from './completeValue.js';
 import { embedErrors } from './embedErrors.js';
 import { getObjectAtPath } from './getObjectAtPath.js';
 import { mapAsyncIterable } from './mapAsyncIterable.js';
@@ -249,26 +242,8 @@ function processCompleted(
         path: pendingResult.path,
       };
     } else {
-      const object = getObjectAtPath(context.mergedResult, pendingResult.path);
-      invariant(isObjectLike(object));
-      const typeName = object[context.prefix];
-      invariant(typeof typeName === 'string');
-      const runtimeType = context.transformedArgs.schema.getType(typeName);
-      invariant(isObjectType(runtimeType));
-
       const errors: Array<GraphQLError> = [];
-
-      const { groupedFieldSetTree } = subsequentResultRecord.executionGroups[0];
-      const objectPath = pathFromArray(pendingResult.path);
-
-      const data = completeObjectValue(
-        context,
-        errors,
-        groupedFieldSetTree,
-        runtimeType,
-        object,
-        objectPath,
-      );
+      const data = subsequentResultRecord.executionGroups[0].result(errors);
 
       incrementalResult = { data, path: pendingResult.path };
 
@@ -331,15 +306,4 @@ function transformInitialResult<
   const data = completeInitialResult(context, originalData, rootType, errors);
 
   return (rest.errors ? { ...rest, errors, data } : { ...rest, data }) as T;
-}
-
-function pathFromArray(path: ReadonlyArray<string | number>): Path | undefined {
-  if (path.length === 0) {
-    return undefined;
-  }
-  let current = addPath(undefined, path[0], undefined);
-  for (let i = 1; i < path.length; i++) {
-    current = addPath(current, path[i], undefined);
-  }
-  return current;
 }

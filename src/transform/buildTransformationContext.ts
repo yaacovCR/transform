@@ -1,6 +1,7 @@
 import type {
   ArgumentNode,
   DirectiveNode,
+  GraphQLError,
   GraphQLOutputType,
   SelectionNode,
   SelectionSetNode,
@@ -18,7 +19,7 @@ import { mapValue } from '../jsutils/mapValue.js';
 import type { ObjMap } from '../jsutils/ObjMap.js';
 import type { Path } from '../jsutils/Path.js';
 
-import type { FieldDetails, GroupedFieldSetTree } from './collectFields.js';
+import type { FieldDetails } from './collectFields.js';
 
 export interface OriginalStream {
   originalLabel: string | undefined;
@@ -45,7 +46,7 @@ interface DeferredFragment {
 }
 
 interface ExecutionGroup {
-  groupedFieldSetTree: GroupedFieldSetTree;
+  result: (errors: Array<GraphQLError>) => ObjMap<unknown>;
 }
 
 export interface EncounteredPendingResult {
