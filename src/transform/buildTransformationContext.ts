@@ -2,7 +2,6 @@ import type {
   ArgumentNode,
   DirectiveNode,
   GraphQLError,
-  GraphQLOutputType,
   SelectionNode,
   SelectionSetNode,
   ValidatedExecutionArgs,
@@ -17,18 +16,16 @@ import {
 import { invariant } from '../jsutils/invariant.js';
 import { mapValue } from '../jsutils/mapValue.js';
 import type { ObjMap } from '../jsutils/ObjMap.js';
-import type { Path } from '../jsutils/Path.js';
-
-import type { FieldDetails } from './collectFields.js';
 
 export interface OriginalStream {
   originalLabel: string | undefined;
-  fieldDetailsList: ReadonlyArray<FieldDetails>;
+  result: (
+    errors: Array<GraphQLError>,
+    nextIndex: number,
+  ) => ReadonlyArray<unknown>;
 }
 
 interface Stream {
-  path: Path;
-  itemType: GraphQLOutputType;
   originalStreams: Array<OriginalStream>;
   nextIndex: number;
 }

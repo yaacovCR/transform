@@ -14,14 +14,13 @@ import type {
 
 import { invariant } from '../jsutils/invariant.js';
 import type { ObjMap } from '../jsutils/ObjMap.js';
-import { pathToArray } from '../jsutils/Path.js';
 
 import type {
   EncounteredPendingResult,
   TransformationContext,
 } from './buildTransformationContext.js';
 import { isStream } from './buildTransformationContext.js';
-import { completeInitialResult, completeListValue } from './completeValue.js';
+import { completeInitialResult } from './completeValue.js';
 import { embedErrors } from './embedErrors.js';
 import { getObjectAtPath } from './getObjectAtPath.js';
 import { mapAsyncIterable } from './mapAsyncIterable.js';
@@ -140,7 +139,7 @@ function processIncremental(
   context: TransformationContext,
   incrementalResults: ReadonlyArray<IncrementalResult>,
 ): ReadonlyArray<LegacyIncrementalStreamResult> {
-  const streamKeys = new Set<string>();
+  const pendingStreams = new Set<EncounteredPendingResult>();
   for (const incrementalResult of incrementalResults) {
     const id = incrementalResult.id;
     const pendingResult = context.encounteredPendingResults.get(id);
@@ -156,7 +155,7 @@ function processIncremental(
       const errors = incrementalResult.errors;
       incompleteAtPath.push(...items);
       embedErrors(context.mergedResult, errors);
-      streamKeys.add(pendingResult.key);
+      pendingStreams.add(pendingResult);
     } else {
       invariant('data' in incrementalResult);
       for (const [key, value] of Object.entries(
@@ -169,28 +168,19 @@ function processIncremental(
   }
 
   const incremental: Array<LegacyIncrementalStreamResult> = [];
-  for (const key of streamKeys) {
-    const stream = context.subsequentResultRecords.get(key);
+  for (const pendingStream of pendingStreams) {
+    const stream = context.subsequentResultRecords.get(pendingStream.key);
     invariant(stream != null);
     invariant(isStream(stream));
-    const { path, itemType, originalStreams, nextIndex } = stream;
-    const list = getObjectAtPath(context.mergedResult, pathToArray(path));
-    invariant(Array.isArray(list));
-    for (const { originalLabel, fieldDetailsList } of originalStreams) {
+    const { nextIndex, originalStreams } = stream;
+    for (const originalStream of originalStreams) {
+      const { originalLabel, result } = originalStream;
       const errors: Array<GraphQLError> = [];
-      const items = completeListValue(
-        context,
-        errors,
-        itemType,
-        fieldDetailsList,
-        list,
-        path,
-        nextIndex,
-      );
-      stream.nextIndex = list.length;
+      const items = result(errors, nextIndex);
+      stream.nextIndex = nextIndex + items.length;
       const newIncrementalResult: LegacyIncrementalStreamResult = {
         items,
-        path: [...pathToArray(path), nextIndex],
+        path: [...pendingStream.path, nextIndex],
       };
       if (errors.length > 0) {
         newIncrementalResult.errors = errors;

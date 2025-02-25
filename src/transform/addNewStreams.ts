@@ -1,15 +1,15 @@
-import type { GraphQLOutputType } from 'graphql';
+import type { GraphQLError, GraphQLOutputType } from 'graphql';
 import { getDirectiveValues, GraphQLStreamDirective } from 'graphql';
-import { pathToArray } from 'graphql/jsutils/Path';
 
 import { invariant } from '../jsutils/invariant.js';
 import type { Path } from '../jsutils/Path.js';
+import { pathToArray } from '../jsutils/Path.js';
 
-import type {TransformationContext} from './buildTransformationContext.js';
-import {
-  isStream
-} from './buildTransformationContext.js';
+import type { TransformationContext } from './buildTransformationContext.js';
+import { isStream } from './buildTransformationContext.js';
 import type { FieldDetails } from './collectFields.js';
+import { completeListValue } from './completeValue.js';
+import { getObjectAtPath } from './getObjectAtPath.js';
 
 export function addNewStreams(
   context: TransformationContext,
@@ -59,13 +59,29 @@ export function addNewStreams(
     }
   }
 
-  const originalStreams = Array.from(originalStreamsByDeferLabel.values());
+  const list = getObjectAtPath(context.mergedResult, pathToArray(path));
+  invariant(Array.isArray(list));
+
+  const originalStreams = Array.from(originalStreamsByDeferLabel.values()).map(
+    ({ originalLabel, fieldDetailsList: fieldDetailsListForStream }) => ({
+      originalLabel,
+      result: (errors: Array<GraphQLError>, index: number) =>
+        completeListValue(
+          context,
+          errors,
+          itemType,
+          fieldDetailsListForStream,
+          list,
+          path,
+          index,
+        ),
+    }),
+  );
+
   const key = pendingLabel + '.' + pathStr;
   const streamForPendingLabel = context.subsequentResultRecords.get(key);
   if (streamForPendingLabel == null) {
     context.subsequentResultRecords.set(key, {
-      path,
-      itemType,
       originalStreams,
       nextIndex,
     });
