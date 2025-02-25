@@ -75,6 +75,7 @@ export function addNewStreams(
           path,
           index,
         ),
+      nextIndex,
     }),
   );
 
@@ -83,7 +84,6 @@ export function addNewStreams(
   if (streamForPendingLabel == null) {
     context.subsequentResultRecords.set(key, {
       originalStreams,
-      nextIndex,
     });
   } else {
     invariant(isStream(streamForPendingLabel));

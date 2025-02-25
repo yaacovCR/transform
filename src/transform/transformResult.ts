@@ -172,12 +172,12 @@ function processIncremental(
     const stream = context.subsequentResultRecords.get(pendingStream.key);
     invariant(stream != null);
     invariant(isStream(stream));
-    const { nextIndex, originalStreams } = stream;
+    const { originalStreams } = stream;
     for (const originalStream of originalStreams) {
-      const { originalLabel, result } = originalStream;
+      const { originalLabel, result, nextIndex } = originalStream;
       const errors: Array<GraphQLError> = [];
       const items = result(errors, nextIndex);
-      stream.nextIndex = nextIndex + items.length;
+      originalStream.nextIndex = nextIndex + items.length;
       const newIncrementalResult: LegacyIncrementalStreamResult = {
         items,
         path: [...pendingStream.path, nextIndex],

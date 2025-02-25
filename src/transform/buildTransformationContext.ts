@@ -23,11 +23,11 @@ export interface OriginalStream {
     errors: Array<GraphQLError>,
     nextIndex: number,
   ) => ReadonlyArray<unknown>;
+  nextIndex: number;
 }
 
 interface Stream {
   originalStreams: Array<OriginalStream>;
-  nextIndex: number;
 }
 
 export function isStream(
