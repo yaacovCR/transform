@@ -4,14 +4,7 @@ import type {
   GraphQLOutputType,
   ValidatedExecutionArgs,
 } from 'graphql';
-import {
-  getDirectiveValues,
-  GraphQLStreamDirective,
-  isLeafType,
-  isListType,
-  isNonNullType,
-  isObjectType,
-} from 'graphql';
+import { isLeafType, isListType, isNonNullType, isObjectType } from 'graphql';
 
 import { invariant } from '../jsutils/invariant.js';
 import { isObjectLike } from '../jsutils/isObjectLike.js';
@@ -21,10 +14,13 @@ import type { Path } from '../jsutils/Path.js';
 import { addPath, pathToArray } from '../jsutils/Path.js';
 
 import { addNewDeferredFragments } from './addNewDeferredFragments.js';
+import { addNewStreams } from './addNewStreams.js';
 import type { TransformationContext } from './buildTransformationContext.js';
-import { isStream } from './buildTransformationContext.js';
-import type { FieldDetails, GroupedFieldSet } from './collectFields.js';
-import { collectSubfields as _collectSubfields } from './collectFields.js';
+import type { FieldDetails, GroupedFieldSetTree } from './collectFields.js';
+import {
+  collectRootFields,
+  collectSubfields as _collectSubfields,
+} from './collectFields.js';
 import { inlineDefers } from './inlineDefers.js';
 
 const collectSubfields = memoize3(
@@ -35,38 +31,29 @@ const collectSubfields = memoize3(
   ) => _collectSubfields(validatedExecutionArgs, returnType, fieldDetailsList),
 );
 
-// eslint-disable-next-line @typescript-eslint/max-params
-export function completeValue(
+export function completeInitialResult(
   context: TransformationContext,
-  rootValue: ObjMap<unknown>,
+  originalData: ObjMap<unknown>,
   rootType: GraphQLObjectType,
-  groupedFieldSet: GroupedFieldSet,
   errors: Array<GraphQLError>,
-  path: Path | undefined,
 ): ObjMap<unknown> {
-  const transformedArgs = context.transformedArgs;
-  const data = Object.create(null);
-  for (const [responseName, fieldDetailsList] of groupedFieldSet) {
-    const fieldName = fieldDetailsList[0].node.name.value;
-    const fieldDef = transformedArgs.schema.getField(rootType, fieldName);
+  const groupedFieldSetTree = collectRootFields(
+    context.transformedArgs,
+    rootType,
+  );
 
-    if (fieldDef) {
-      data[responseName] = completeSubValue(
-        context,
-        errors,
-        fieldDef.type,
-        fieldDetailsList,
-        rootValue[responseName],
-        addPath(path, responseName, undefined),
-      );
-    }
-  }
-
-  return data;
+  return completeObjectValue(
+    context,
+    errors,
+    groupedFieldSetTree,
+    rootType,
+    originalData,
+    undefined,
+  );
 }
 
 // eslint-disable-next-line @typescript-eslint/max-params
-function completeSubValue(
+function completeValue(
   context: TransformationContext,
   errors: Array<GraphQLError>,
   returnType: GraphQLOutputType,
@@ -75,7 +62,7 @@ function completeSubValue(
   path: Path,
 ): unknown {
   if (isNonNullType(returnType)) {
-    return completeSubValue(
+    return completeValue(
       context,
       errors,
       returnType.ofType,
@@ -114,69 +101,91 @@ function completeSubValue(
       path,
     );
 
-    maybeAddStream(context, itemType, fieldDetailsList, path, result.length);
+    addNewStreams(context, itemType, fieldDetailsList, path, result.length);
 
     return completed;
   }
 
   invariant(isObjectLike(result));
-  return completeObjectValue(context, errors, fieldDetailsList, result, path);
-}
 
-function completeObjectValue(
-  context: TransformationContext,
-  errors: Array<GraphQLError>,
-  fieldDetailsList: ReadonlyArray<FieldDetails>,
-  result: ObjMap<unknown>,
-  path: Path,
-): ObjMap<unknown> {
   const { prefix, transformedArgs } = context;
 
   const typeName = result[prefix];
 
+  if (typeName == null) {
+    return Object.create(null);
+  }
+
+  invariant(typeof typeName === 'string');
+
+  const runtimeType = transformedArgs.schema.getType(typeName);
+
+  invariant(isObjectType(runtimeType));
+
+  const groupedFieldSetTree = collectSubfields(
+    transformedArgs,
+    runtimeType,
+    fieldDetailsList,
+  );
+
+  return completeObjectValue(
+    context,
+    errors,
+    groupedFieldSetTree,
+    runtimeType,
+    result,
+    path,
+  );
+}
+
+// eslint-disable-next-line @typescript-eslint/max-params
+export function completeObjectValue(
+  context: TransformationContext,
+  errors: Array<GraphQLError>,
+  groupedFieldSetTree: GroupedFieldSetTree,
+  runtimeType: GraphQLObjectType,
+  originalData: ObjMap<unknown>,
+  path: Path | undefined,
+): ObjMap<unknown> {
+  const pathArr = pathToArray(path);
+  const pathStr = pathArr.join('.');
+  const { groupedFieldSet, deferredFragmentDetails } = inlineDefers(
+    context,
+    groupedFieldSetTree,
+    pathStr,
+  );
+
+  addNewDeferredFragments(
+    context,
+    deferredFragmentDetails,
+    runtimeType,
+    path,
+    pathArr,
+    pathStr,
+  );
+
+  const {
+    prefix,
+    transformedArgs: { schema },
+  } = context;
   const completed = Object.create(null);
+  for (const [responseName, fieldDetailsList] of groupedFieldSet) {
+    if (responseName === prefix) {
+      continue;
+    }
 
-  if (typeName != null) {
-    invariant(typeof typeName === 'string');
+    const fieldName = fieldDetailsList[0].node.name.value;
+    const fieldDef = schema.getField(runtimeType, fieldName);
 
-    const runtimeType = transformedArgs.schema.getType(typeName);
-
-    invariant(isObjectType(runtimeType));
-
-    const groupedFieldSetTree = collectSubfields(
-      transformedArgs,
-      runtimeType,
-      fieldDetailsList,
-    );
-
-    const pathStr = pathToArray(path).join('.');
-
-    const { groupedFieldSet, deferredFragmentDetails } = inlineDefers(
-      context,
-      groupedFieldSetTree,
-      pathStr,
-    );
-
-    addNewDeferredFragments(context, deferredFragmentDetails, pathStr);
-
-    for (const [responseName, subFieldDetailsList] of groupedFieldSet) {
-      if (responseName === prefix) {
-        continue;
-      }
-
-      const fieldName = subFieldDetailsList[0].node.name.value;
-      const fieldDef = transformedArgs.schema.getField(runtimeType, fieldName);
-
-      if (fieldDef) {
-        completed[responseName] = completeSubValue(
-          context,
-          errors,
-          fieldDef.type,
-          subFieldDetailsList,
-          result[responseName],
-          addPath(path, responseName, undefined),
-        );
-      }
+    if (fieldDef) {
+      completed[responseName] = completeValue(
+        context,
+        errors,
+        fieldDef.type,
+        fieldDetailsList,
+        originalData[responseName],
+        addPath(path, responseName, undefined),
+      );
     }
   }
 
@@ -196,7 +205,7 @@ export function completeListValue(
   const completedItems = [];
 
   for (let index = initialIndex; index < result.length; index++) {
-    const completed = completeSubValue(
+    const completed = completeValue(
       context,
       errors,
       itemType,
@@ -208,68 +217,4 @@ export function completeListValue(
   }
 
   return completedItems;
-}
-
-function maybeAddStream(
-  context: TransformationContext,
-  itemType: GraphQLOutputType,
-  fieldDetailsList: ReadonlyArray<FieldDetails>,
-  path: Path,
-  nextIndex: number,
-): void {
-  const pathStr = pathToArray(path).join('.');
-  const pendingLabels = context.pendingLabelsByPath.get(pathStr);
-  if (pendingLabels == null) {
-    return;
-  }
-
-  // for stream, there must be at most one pending label at this path
-  const pendingLabel = pendingLabels.values().next().value;
-  invariant(pendingLabel != null);
-
-  const originalStreamsByDeferLabel = new Map<
-    string | undefined,
-    {
-      originalLabel: string | undefined;
-      fieldDetailsList: Array<FieldDetails>;
-    }
-  >();
-  for (const fieldDetails of fieldDetailsList) {
-    const stream = getDirectiveValues(
-      GraphQLStreamDirective,
-      fieldDetails.node,
-      context.transformedArgs.variableValues,
-      fieldDetails.fragmentVariableValues,
-    );
-    if (stream != null) {
-      const label = stream.label;
-      invariant(typeof label === 'string');
-      const originalStreamLabel = context.originalLabels.get(label);
-      const deferLabel = fieldDetails.deferUsage?.label;
-      let originalStream = originalStreamsByDeferLabel.get(deferLabel);
-      if (originalStream === undefined) {
-        originalStream = {
-          originalLabel: originalStreamLabel,
-          fieldDetailsList: [],
-        };
-        originalStreamsByDeferLabel.set(deferLabel, originalStream);
-      }
-      originalStream.fieldDetailsList.push(fieldDetails);
-    }
-  }
-
-  const originalStreams = Array.from(originalStreamsByDeferLabel.values());
-  const key = pendingLabel + '.' + pathStr;
-  const streamForPendingLabel = context.subsequentResultRecords.get(key);
-  if (streamForPendingLabel == null) {
-    context.subsequentResultRecords.set(key, {
-      path,
-      itemType,
-      originalStreams,
-      nextIndex,
-    });
-  } else {
-    invariant(isStream(streamForPendingLabel));
-    streamForPendingLabel.originalStreams.push(...originalStreams);
-  }
 }

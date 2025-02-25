@@ -1,7 +1,7 @@
 import type {
   ArgumentNode,
   DirectiveNode,
-  GraphQLOutputType,
+  GraphQLError,
   SelectionNode,
   SelectionSetNode,
   ValidatedExecutionArgs,
@@ -16,20 +16,18 @@ import {
 import { invariant } from '../jsutils/invariant.js';
 import { mapValue } from '../jsutils/mapValue.js';
 import type { ObjMap } from '../jsutils/ObjMap.js';
-import type { Path } from '../jsutils/Path.js';
-
-import type { FieldDetails, GroupedFieldSetTree } from './collectFields.js';
 
 export interface OriginalStream {
   originalLabel: string | undefined;
-  fieldDetailsList: ReadonlyArray<FieldDetails>;
+  result: (
+    errors: Array<GraphQLError>,
+    nextIndex: number,
+  ) => ReadonlyArray<unknown>;
+  nextIndex: number;
 }
 
 interface Stream {
-  path: Path;
-  itemType: GraphQLOutputType;
   originalStreams: Array<OriginalStream>;
-  nextIndex: number;
 }
 
 export function isStream(
@@ -45,7 +43,7 @@ interface DeferredFragment {
 }
 
 interface ExecutionGroup {
-  groupedFieldSetTree: GroupedFieldSetTree;
+  result: (errors: Array<GraphQLError>) => ObjMap<unknown>;
 }
 
 export interface EncounteredPendingResult {
