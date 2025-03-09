@@ -1,7 +1,0 @@
-{
-  "mochaExplorer.files": "src/**/__tests__/**/*-test.ts",
-  "mochaExplorer.nodeArgv": ["--loader=ts-node/esm/transpile-only"],
-  "editor.codeActionsOnSave": {
-    "source.fixAll": "explicit"
-  }
-}
