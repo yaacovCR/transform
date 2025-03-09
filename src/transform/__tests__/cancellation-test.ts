@@ -11,7 +11,7 @@ import { invariant } from '../../jsutils/invariant.js';
 import type {
   LegacyInitialIncrementalExecutionResult,
   LegacySubsequentIncrementalExecutionResult,
-} from '../transformResult.js';
+} from '../PayloadPublisher.js';
 
 import { execute } from './execute.js';
 

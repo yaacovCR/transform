@@ -21,7 +21,7 @@ import { promiseWithResolvers } from '../../jsutils/promiseWithResolvers.js';
 import type {
   LegacyInitialIncrementalExecutionResult,
   LegacySubsequentIncrementalExecutionResult,
-} from '../transformResult.js';
+} from '../PayloadPublisher.js';
 
 import { execute } from './execute.js';
 
@@ -1935,6 +1935,15 @@ describe('Execute: legacy stream directive', () => {
       {
         incremental: [
           {
+            data: { nestedFriendList: [] },
+            path: ['nestedObject'],
+          },
+        ],
+        hasNext: true,
+      },
+      {
+        incremental: [
+          {
             items: [{ id: '1' }],
             path: ['nestedObject', 'nestedFriendList', 0],
           },
@@ -2072,10 +2081,7 @@ describe('Execute: legacy stream directive', () => {
           },
           {
             data: {
-              nestedFriendList: [
-                { id: '1', name: 'Luke' },
-                { id: '2', name: 'Han' },
-              ],
+              nestedFriendList: [{ id: '1', name: 'Luke' }],
             },
             path: ['nestedObject'],
           },
@@ -2089,8 +2095,11 @@ describe('Execute: legacy stream directive', () => {
             path: ['nestedObject', 'nestedFriendList', 2],
           },
           {
-            items: [{ id: '3', name: 'Leia' }],
-            path: ['nestedObject', 'nestedFriendList', 2],
+            items: [
+              { id: '2', name: 'Han' },
+              { id: '3', name: 'Leia' },
+            ],
+            path: ['nestedObject', 'nestedFriendList', 1],
           },
         ],
         hasNext: true,
@@ -2283,13 +2292,6 @@ describe('Execute: legacy stream directive', () => {
     const result4 = await iterator.next();
     expectJSON(result4).toDeepEqual({
       value: {
-        hasNext: true,
-      },
-      done: false,
-    });
-    const result5 = await iterator.next();
-    expectJSON(result5).toDeepEqual({
-      value: {
         incremental: [
           {
             data: { name: 'Han' },
@@ -2301,8 +2303,8 @@ describe('Execute: legacy stream directive', () => {
       },
       done: false,
     });
-    const result6 = await iterator.next();
-    expectJSON(result6).toDeepEqual({
+    const result5 = await iterator.next();
+    expectJSON(result5).toDeepEqual({
       value: undefined,
       done: true,
     });

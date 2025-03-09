@@ -1,7 +1,7 @@
 import type {
   ArgumentNode,
   DirectiveNode,
-  GraphQLOutputType,
+  GraphQLError,
   SelectionNode,
   SelectionSetNode,
   ValidatedExecutionArgs,
@@ -18,50 +18,61 @@ import { mapValue } from '../jsutils/mapValue.js';
 import type { ObjMap } from '../jsutils/ObjMap.js';
 import type { Path } from '../jsutils/Path.js';
 
-import type { FieldDetails, GroupedFieldSetTree } from './collectFields.js';
-
-export interface OriginalStream {
-  originalLabel: string | undefined;
-  fieldDetailsList: ReadonlyArray<FieldDetails>;
-}
-
-interface Stream {
+export interface Stream {
   path: Path;
-  itemType: GraphQLOutputType;
-  originalStreams: Array<OriginalStream>;
+  label: string | undefined;
+  pathStr: string;
+  originalLabel: string | undefined;
+  source: Array<unknown>;
+  result: (nextIndex: number) => StreamItemsResult;
   nextIndex: number;
 }
 
+export interface StreamItemsResult {
+  stream: Stream;
+  items: ReadonlyArray<unknown>;
+  errors: ReadonlyMap<Path | undefined, GraphQLError>;
+  incrementalDataRecords: ReadonlyArray<IncrementalDataRecord>;
+}
+
 export function isStream(
-  subsequentResultRecord: SubsequentResultRecord,
-): subsequentResultRecord is Stream {
-  return 'originalStreams' in subsequentResultRecord;
+  record: IncrementalDataRecord | SubsequentResultRecord,
+): record is Stream {
+  return 'nextIndex' in record;
 }
 
-type SubsequentResultRecord = DeferredFragment | Stream;
-interface DeferredFragment {
-  originalLabel: string | undefined;
-  executionGroups: Array<ExecutionGroup>;
-}
+export type SubsequentResultRecord = DeferredFragment | Stream;
 
-interface ExecutionGroup {
-  groupedFieldSetTree: GroupedFieldSetTree;
-}
-
-export interface EncounteredPendingResult {
-  path: ReadonlyArray<string | number>;
+export interface DeferredFragment {
+  path: Path | undefined;
+  label: string | undefined;
   pathStr: string;
-  label: string;
   key: string;
+  parent: DeferredFragment | undefined;
+  originalLabel: string | undefined;
+  pendingExecutionGroups: Set<PendingExecutionGroup>;
+  children: Array<SubsequentResultRecord>;
 }
+
+export interface PendingExecutionGroup {
+  path: Path | undefined;
+  deferredFragments: ReadonlyArray<DeferredFragment>;
+  result: () => ExecutionGroupResult;
+}
+
+export interface ExecutionGroupResult {
+  pendingExecutionGroup: PendingExecutionGroup;
+  data: ObjMap<unknown>;
+  errors: ReadonlyMap<Path | undefined, GraphQLError>;
+  incrementalDataRecords: ReadonlyArray<IncrementalDataRecord>;
+}
+
+export type IncrementalDataRecord = PendingExecutionGroup | Stream;
 
 export interface TransformationContext {
   transformedArgs: ValidatedExecutionArgs;
   originalLabels: Map<string, string | undefined>;
   prefix: string;
-  subsequentResultRecords: Map<string, SubsequentResultRecord>;
-  encounteredPendingResults: Map<string, EncounteredPendingResult>;
-  pendingLabelsByPath: Map<string, Set<string>>;
   mergedResult: ObjMap<unknown>;
 }
 
@@ -111,10 +122,7 @@ export function buildTransformationContext(
     transformedArgs,
     originalLabels: context.originalLabels,
     prefix,
-    subsequentResultRecords: new Map(),
-    encounteredPendingResults: new Map(),
-    pendingLabelsByPath: new Map(),
-    mergedResult: {},
+    mergedResult: Object.create(null),
   };
 }
 

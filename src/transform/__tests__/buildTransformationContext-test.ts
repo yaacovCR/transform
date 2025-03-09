@@ -36,9 +36,6 @@ describe('buildTransformationContext', () => {
 
     expect(context.originalLabels instanceof Map).to.equal(true);
     expect(context.prefix).to.equal('__prefix__');
-    expect(context.subsequentResultRecords instanceof Map).to.equal(true);
-    expect(context.pendingLabelsByPath instanceof Map).to.equal(true);
-    expect(context.encounteredPendingResults instanceof Map).to.equal(true);
     expect(context.mergedResult).to.deep.equal({});
   });
 

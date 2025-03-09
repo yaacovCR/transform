@@ -19,7 +19,7 @@ import { legacyExecuteIncrementally } from '../legacyExecuteIncrementally.js';
 import type {
   LegacyInitialIncrementalExecutionResult,
   LegacySubsequentIncrementalExecutionResult,
-} from '../transformResult.js';
+} from '../PayloadPublisher.js';
 
 const someObjectType = new GraphQLObjectType({
   name: 'SomeObject',

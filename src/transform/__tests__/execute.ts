@@ -4,7 +4,7 @@ import { isPromise } from '../../jsutils/isPromise.js';
 import type { PromiseOrValue } from '../../jsutils/PromiseOrValue.js';
 
 import { legacyExecuteIncrementally } from '../legacyExecuteIncrementally.js';
-import type { LegacyExperimentalIncrementalExecutionResults } from '../transformResult.js';
+import type { LegacyExperimentalIncrementalExecutionResults } from '../PayloadPublisher.js';
 
 export function executeSync(args: ExecutionArgs): ExecutionResult {
   const result = legacyExecuteIncrementally(args);
