@@ -19,7 +19,7 @@ import { promiseWithResolvers } from '../../jsutils/promiseWithResolvers.js';
 import type {
   LegacyInitialIncrementalExecutionResult,
   LegacySubsequentIncrementalExecutionResult,
-} from '../transformResult.js';
+} from '../PayloadPublisher.js';
 
 import { execute } from './execute.js';
 
@@ -500,13 +500,28 @@ describe('Execute: legacy defer directive format', () => {
       }
     `);
     const result = await complete(document);
-    expectJSON(result).toDeepEqual({
-      data: {
-        hero: {
-          name: 'Luke',
+    expectJSON(result).toDeepEqual([
+      {
+        data: {
+          hero: {
+            name: 'Luke',
+          },
         },
+        hasNext: true,
       },
-    });
+      {
+        incremental: [
+          {
+            data: {
+              name: 'Luke',
+            },
+            path: ['hero'],
+            label: 'DeferTop',
+          },
+        ],
+        hasNext: false,
+      },
+    ]);
   });
   it('Can defer a fragment that is also not deferred, non-deferred fragment is first', async () => {
     const document = parse(`
@@ -1331,6 +1346,17 @@ describe('Execute: legacy defer directive format', () => {
         incremental: [
           {
             data: {
+              nestedObject: { deeperObject: {} },
+            },
+            path: ['hero'],
+          },
+        ],
+        hasNext: true,
+      },
+      {
+        incremental: [
+          {
+            data: {
               foo: 'foo',
             },
             path: ['hero', 'nestedObject', 'deeperObject'],
@@ -1454,6 +1480,12 @@ describe('Execute: legacy defer directive format', () => {
               },
             },
             path: [],
+          },
+          {
+            data: {
+              shouldBeWithNameDespiteAdditionalDefer: 'Luke',
+            },
+            path: ['hero'],
           },
         ],
         hasNext: false,
@@ -1809,19 +1841,41 @@ describe('Execute: legacy defer directive format', () => {
       },
       true,
     );
-    expectJSON(result).toDeepEqual({
-      data: {
-        hero: null,
-      },
-      errors: [
-        {
-          message:
-            'Cannot return null for non-nullable field Hero.nonNullName.',
-          locations: [{ line: 4, column: 11 }],
-          path: ['hero', 'nonNullName'],
+    expectJSON(result).toDeepEqual([
+      {
+        data: {
+          hero: null,
         },
-      ],
-    });
+        errors: [
+          {
+            message:
+              'Cannot return null for non-nullable field Hero.nonNullName.',
+            locations: [{ line: 4, column: 11 }],
+            path: ['hero', 'nonNullName'],
+          },
+        ],
+        hasNext: true,
+      },
+      {
+        incremental: [
+          {
+            data: {
+              hero: null,
+            },
+            path: [],
+            errors: [
+              {
+                message:
+                  'Cannot return null for non-nullable field Hero.nonNullName.',
+                locations: [{ line: 4, column: 11 }],
+                path: ['hero', 'nonNullName'],
+              },
+            ],
+          },
+        ],
+        hasNext: false,
+      },
+    ]);
   });
 
   it('Cancels deferred fields when deferred result exhibits null bubbling', async () => {
@@ -1872,7 +1926,7 @@ describe('Execute: legacy defer directive format', () => {
     ]);
   });
 
-  it('Deduplicates list fields', async () => {
+  it('Handles duplicated list fields', async () => {
     const document = parse(`
       query {
         hero {
@@ -1888,16 +1942,30 @@ describe('Execute: legacy defer directive format', () => {
       }
     `);
     const result = await complete(document);
-    expectJSON(result).toDeepEqual({
-      data: {
-        hero: {
-          friends: [{ name: 'Han' }, { name: 'Leia' }, { name: 'C-3PO' }],
+    expectJSON(result).toDeepEqual([
+      {
+        data: {
+          hero: {
+            friends: [{ name: 'Han' }, { name: 'Leia' }, { name: 'C-3PO' }],
+          },
         },
+        hasNext: true,
       },
-    });
+      {
+        incremental: [
+          {
+            data: {
+              friends: [{ name: 'Han' }, { name: 'Leia' }, { name: 'C-3PO' }],
+            },
+            path: ['hero'],
+          },
+        ],
+        hasNext: false,
+      },
+    ]);
   });
 
-  it('Deduplicates async iterable list fields', async () => {
+  it('Handles duplicated async iterable list fields', async () => {
     const document = parse(`
       query {
         hero {
@@ -1920,9 +1988,21 @@ describe('Execute: legacy defer directive format', () => {
         },
       },
     });
-    expectJSON(result).toDeepEqual({
-      data: { hero: { friends: [{ name: 'Han' }] } },
-    });
+    expectJSON(result).toDeepEqual([
+      {
+        data: { hero: { friends: [{ name: 'Han' }] } },
+        hasNext: true,
+      },
+      {
+        incremental: [
+          {
+            data: { friends: [{ name: 'Han' }] },
+            path: ['hero'],
+          },
+        ],
+        hasNext: false,
+      },
+    ]);
   });
 
   it('Handles empty async iterable list fields', async () => {
@@ -1949,9 +2029,21 @@ describe('Execute: legacy defer directive format', () => {
         },
       },
     });
-    expectJSON(result).toDeepEqual({
-      data: { hero: { friends: [] } },
-    });
+    expectJSON(result).toDeepEqual([
+      {
+        data: { hero: { friends: [] } },
+        hasNext: true,
+      },
+      {
+        incremental: [
+          {
+            data: { friends: [] },
+            path: ['hero'],
+          },
+        ],
+        hasNext: false,
+      },
+    ]);
   });
 
   it('Handles list fields with non-overlapping fields', async () => {
@@ -2014,12 +2106,24 @@ describe('Execute: legacy defer directive format', () => {
         friends: () => [],
       },
     });
-    expectJSON(result).toDeepEqual({
-      data: { hero: { friends: [] } },
-    });
+    expectJSON(result).toDeepEqual([
+      {
+        data: { hero: { friends: [] } },
+        hasNext: true,
+      },
+      {
+        incremental: [
+          {
+            data: { friends: [] },
+            path: ['hero'],
+          },
+        ],
+        hasNext: false,
+      },
+    ]);
   });
 
-  it('Deduplicates null object fields', async () => {
+  it('Handles duplicated null object fields', async () => {
     const document = parse(`
       query {
         hero {
@@ -2040,12 +2144,24 @@ describe('Execute: legacy defer directive format', () => {
         nestedObject: () => null,
       },
     });
-    expectJSON(result).toDeepEqual({
-      data: { hero: { nestedObject: null } },
-    });
+    expectJSON(result).toDeepEqual([
+      {
+        data: { hero: { nestedObject: null } },
+        hasNext: true,
+      },
+      {
+        incremental: [
+          {
+            data: { nestedObject: null },
+            path: ['hero'],
+          },
+        ],
+        hasNext: false,
+      },
+    ]);
   });
 
-  it('Deduplicates promise object fields', async () => {
+  it('Handles duplicated promise object fields', async () => {
     const document = parse(`
       query {
         hero {
@@ -2065,9 +2181,21 @@ describe('Execute: legacy defer directive format', () => {
         nestedObject: () => Promise.resolve({ name: 'foo' }),
       },
     });
-    expectJSON(result).toDeepEqual({
-      data: { hero: { nestedObject: { name: 'foo' } } },
-    });
+    expectJSON(result).toDeepEqual([
+      {
+        data: { hero: { nestedObject: { name: 'foo' } } },
+        hasNext: true,
+      },
+      {
+        incremental: [
+          {
+            data: { nestedObject: { name: 'foo' } },
+            path: ['hero'],
+          },
+        ],
+        hasNext: false,
+      },
+    ]);
   });
 
   it('Handles errors thrown in deferred fragments', async () => {

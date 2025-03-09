@@ -7,41 +7,28 @@ import type { ObjMap } from '../jsutils/ObjMap.js';
 export function embedErrors(
   data: ObjMap<unknown> | null,
   errors: ReadonlyArray<GraphQLError> | undefined,
-): Array<GraphQLError> {
+): void {
   if (errors == null || errors.length === 0) {
-    return [];
+    return;
   }
-  const errorsWithoutValidPath: Array<GraphQLError> = [];
   for (const error of errors) {
     if (!error.path || error.path.length === 0) {
-      errorsWithoutValidPath.push(error);
       continue;
     }
-    embedErrorByPath(
-      error,
-      error.path,
-      error.path[0],
-      1,
-      data,
-      errorsWithoutValidPath,
-    );
+    embedErrorByPath(error, error.path, error.path[0], 1, data);
   }
-  return errorsWithoutValidPath;
 }
 
-// eslint-disable-next-line @typescript-eslint/max-params
 function embedErrorByPath(
   error: GraphQLError,
   path: ReadonlyArray<string | number>,
   currentKey: string | number,
   nextIndex: number,
   parent: unknown,
-  errorsWithoutValidPath: Array<GraphQLError>,
 ): void {
   if (nextIndex === path.length) {
     if (Array.isArray(parent)) {
       if (typeof currentKey !== 'number') {
-        errorsWithoutValidPath.push(error);
         return;
       }
       invariant(
@@ -55,7 +42,6 @@ function embedErrorByPath(
     }
     if (isObjectLike(parent)) {
       if (typeof currentKey !== 'string') {
-        errorsWithoutValidPath.push(error);
         return;
       }
       invariant(
@@ -63,14 +49,12 @@ function embedErrorByPath(
       );
       return;
     }
-    errorsWithoutValidPath.push(error);
     return;
   }
 
   let next: unknown;
   if (Array.isArray(parent)) {
     if (typeof currentKey !== 'number') {
-      errorsWithoutValidPath.push(error);
       return;
     }
     next = maybeEmbed(
@@ -83,7 +67,6 @@ function embedErrorByPath(
     }
   } else if (isObjectLike(parent)) {
     if (typeof currentKey !== 'string') {
-      errorsWithoutValidPath.push(error);
       return;
     }
     next = maybeEmbed(parent, currentKey, error);
@@ -91,18 +74,10 @@ function embedErrorByPath(
       return;
     }
   } else {
-    errorsWithoutValidPath.push(error);
     return;
   }
 
-  embedErrorByPath(
-    error,
-    path,
-    path[nextIndex],
-    nextIndex + 1,
-    next,
-    errorsWithoutValidPath,
-  );
+  embedErrorByPath(error, path, path[nextIndex], nextIndex + 1, next);
 }
 
 function maybeEmbed(

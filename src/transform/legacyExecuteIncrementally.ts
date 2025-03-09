@@ -7,7 +7,7 @@ import { isPromise } from '../jsutils/isPromise.js';
 import type { PromiseOrValue } from '../jsutils/PromiseOrValue.js';
 
 import { buildTransformationContext } from './buildTransformationContext.js';
-import type { LegacyExperimentalIncrementalExecutionResults } from './transformResult.js';
+import type { LegacyExperimentalIncrementalExecutionResults } from './PayloadPublisher.js';
 import { transformResult } from './transformResult.js';
 
 export function legacyExecuteIncrementally(
