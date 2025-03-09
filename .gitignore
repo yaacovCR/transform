@@ -6,6 +6,7 @@
 # https://www.gitignore.io/
 
 /diff-npm-package.html
+/.vscode
 /.eslintcache
 /.cspellcache
 /node_modules
