@@ -36,7 +36,6 @@ describe('buildTransformationContext', () => {
 
     expect(context.originalLabels instanceof Map).to.equal(true);
     expect(context.prefix).to.equal('__prefix__');
-    expect(context.mergedResult).to.deep.equal({});
   });
 
   it('should handle non-standard directives', () => {

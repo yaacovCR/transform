@@ -1,9 +1,4 @@
-import type {
-  ExecutionResult,
-  ExperimentalIncrementalExecutionResults,
-  GraphQLError,
-  InitialIncrementalExecutionResult,
-} from 'graphql';
+import type { GraphQLError } from 'graphql';
 import type {
   CompletedResult,
   IncrementalResult,
@@ -17,12 +12,11 @@ import type { ObjMap } from '../jsutils/ObjMap.js';
 
 import type {
   DeferredFragment,
+  IncrementalDataRecord,
   Stream,
   SubsequentResultRecord,
-  TransformationContext,
 } from './buildTransformationContext.js';
 import { isStream } from './buildTransformationContext.js';
-import { completeInitialResult } from './completeValue.js';
 import { embedErrors } from './embedErrors.js';
 import { getObjectAtPath } from './getObjectAtPath.js';
 import { IncrementalGraph } from './IncrementalGraph.js';
@@ -51,7 +45,7 @@ interface EncounteredPendingResult {
  * @internal
  */
 export class IncrementalPublisher {
-  private _context: TransformationContext;
+  private _mergedResult: ObjMap<unknown>;
   private _incrementalGraph: IncrementalGraph;
   private _payloadPublisher: PayloadPublisher<
     LegacyInitialIncrementalExecutionResult,
@@ -63,8 +57,8 @@ export class IncrementalPublisher {
     Map<string, EncounteredPendingResult>
   >;
 
-  constructor(context: TransformationContext) {
-    this._context = context;
+  constructor(originalData: ObjMap<unknown>) {
+    this._mergedResult = originalData;
     this._payloadPublisher = getPayloadPublisher();
     this._incrementalGraph = new IncrementalGraph();
     this._encounteredResultsById = new Map();
@@ -72,71 +66,26 @@ export class IncrementalPublisher {
   }
 
   buildResponse(
-    result: ExecutionResult | ExperimentalIncrementalExecutionResults,
-  ): ExecutionResult | LegacyExperimentalIncrementalExecutionResults {
-    if ('initialResult' in result) {
-      const initialResult = this.transformInitialResult(result.initialResult);
-
-      return {
-        initialResult,
-        subsequentResults: this._subscribe(result.subsequentResults),
-      };
-    }
-
-    const initialResult = this.transformInitialResult(result);
-
-    invariant(result.data !== undefined);
-
-    if (initialResult.data == null) {
-      invariant(result.errors != null);
-      return { data: null, errors: result.errors };
-    }
-
-    if (this._incrementalGraph.hasNext()) {
-      return {
-        initialResult: this._payloadPublisher.getInitialPayload(
-          initialResult.data,
-          initialResult.errors,
-        ),
-        subsequentResults: this._subscribe(),
-      };
-    }
-
-    return initialResult;
-  }
-
-  transformInitialResult<
-    T extends ExecutionResult | InitialIncrementalExecutionResult,
-  >(result: T): T {
-    const originalData = result.data;
-    if (originalData == null) {
-      return result;
-    }
-
-    embedErrors(originalData, result.errors);
-    this._context.mergedResult = originalData;
-
-    const transformedArgs = this._context.transformedArgs;
-    const { schema, operation } = transformedArgs;
-    const rootType = schema.getRootType(operation.operation);
-    invariant(rootType != null);
-
-    const { pending, ...rest } = result as InitialIncrementalExecutionResult;
-
+    initialResult: {
+      data: ObjMap<unknown>;
+      errors: ReadonlyArray<GraphQLError>;
+      incrementalDataRecords: ReadonlyArray<IncrementalDataRecord>;
+    },
+    pending?: ReadonlyArray<PendingResult>,
+    subsequentResults?: AsyncGenerator<SubsequentIncrementalExecutionResult>,
+  ): LegacyExperimentalIncrementalExecutionResults {
     if (pending != null) {
-      this._context.mergedResult[this._context.prefix] = rootType.name;
       this._processPending(pending);
     }
 
-    const { data, errors, incrementalDataRecords } = completeInitialResult(
-      this._context,
-      originalData,
-      rootType,
-    );
+    const { data, errors, incrementalDataRecords } = initialResult;
 
     this._incrementalGraph.addIncrementalDataRecords(incrementalDataRecords);
 
-    return (rest.errors ? { ...rest, errors, data } : { ...rest, data }) as T;
+    return {
+      initialResult: this._payloadPublisher.getInitialPayload(data, errors),
+      subsequentResults: this._subscribe(subsequentResults),
+    };
   }
 
   private _processPending(pendingResults: ReadonlyArray<PendingResult>): void {
@@ -165,7 +114,9 @@ export class IncrementalPublisher {
   }
 
   private _subscribe(
-    subsequentResults?: AsyncGenerator<SubsequentIncrementalExecutionResult>,
+    subsequentResults:
+      | AsyncGenerator<SubsequentIncrementalExecutionResult>
+      | undefined,
   ): AsyncGenerator<LegacySubsequentIncrementalExecutionResult, void, void> {
     let isDone = false;
 
@@ -235,7 +186,7 @@ export class IncrementalPublisher {
                   stream,
                   streamItemsResult,
                 );
-                stream.nextIndex = stream.source.length;
+                stream.nextIndex += streamItemsResult.items.length;
               }
             }
           }
@@ -290,10 +241,9 @@ export class IncrementalPublisher {
 
     if (isStream(newRootNode)) {
       const nextIndex = newRootNode.nextIndex;
-      // TODO: add test case - inlining by original executor
-      /* c8 ignore start */
-      if (nextIndex > newRootNode.source.length) {
-        const streamItemsResult = newRootNode.result(nextIndex);
+      const streamItemsResult = newRootNode.result(nextIndex);
+      const numItems = streamItemsResult.items.length;
+      if (numItems > 0) {
         this._incrementalGraph.addIncrementalDataRecords(
           streamItemsResult.incrementalDataRecords,
         );
@@ -301,9 +251,8 @@ export class IncrementalPublisher {
           newRootNode,
           streamItemsResult,
         );
-        newRootNode.nextIndex = newRootNode.source.length;
+        newRootNode.nextIndex += numItems;
       }
-      /* c8 ignore stop */
 
       // TODO: add test case - executor completes stream early normally
       /* c8 ignore next 4 */
@@ -370,16 +319,13 @@ export class IncrementalPublisher {
         ? [...pendingResult.path, ...incrementalResult.subPath]
         : pendingResult.path;
 
-      const incompleteAtPath = getObjectAtPath(
-        this._context.mergedResult,
-        path,
-      );
+      const incompleteAtPath = getObjectAtPath(this._mergedResult, path);
       if (Array.isArray(incompleteAtPath)) {
         invariant('items' in incrementalResult);
         incompleteAtPath.push(
           ...(incrementalResult.items as ReadonlyArray<unknown>),
         );
-        embedErrors(this._context.mergedResult, incrementalResult.errors);
+        embedErrors(this._mergedResult, incrementalResult.errors);
         incrementalStreamResults.push(pendingResult);
       } else {
         invariant('data' in incrementalResult);
@@ -388,7 +334,7 @@ export class IncrementalPublisher {
         )) {
           incompleteAtPath[key] = value;
         }
-        embedErrors(this._context.mergedResult, incrementalResult.errors);
+        embedErrors(this._mergedResult, incrementalResult.errors);
       }
     }
     return incrementalStreamResults;

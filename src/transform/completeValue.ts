@@ -44,7 +44,6 @@ import type {
   StreamItemsResult,
   TransformationContext,
 } from './buildTransformationContext.js';
-import { getObjectAtPath } from './getObjectAtPath.js';
 
 interface IncrementalContext {
   errors: Map<Path | undefined, GraphQLError>;
@@ -79,7 +78,6 @@ const collectSubfields = memoize3(
 export function completeInitialResult(
   context: TransformationContext,
   originalData: ObjMap<unknown>,
-  rootType: GraphQLObjectType,
 ): {
   data: ObjMap<unknown>;
   errors: ReadonlyArray<GraphQLError>;
@@ -93,6 +91,9 @@ export function completeInitialResult(
 
   const { schema, operation, fragments, variableValues, hideSuggestions } =
     context.transformedArgs;
+
+  const rootType = schema.getRootType(operation.operation);
+  invariant(rootType != null);
 
   const { groupedFieldSet: originalGroupedFieldSet, newDeferUsages } =
     collectFields(
@@ -123,6 +124,7 @@ export function completeInitialResult(
   collectExecutionGroups(
     context,
     rootType,
+    originalData,
     undefined,
     newGroupedFieldSets,
     incrementalContext,
@@ -277,6 +279,7 @@ function completeValue(
   collectExecutionGroups(
     context,
     runtimeType,
+    result,
     path,
     newGroupedFieldSets,
     incrementalContext,
@@ -330,7 +333,7 @@ export function completeListValue(
   context: TransformationContext,
   itemType: GraphQLOutputType,
   fieldDetailsList: ReadonlyArray<FieldDetails>,
-  result: Array<unknown>,
+  result: ReadonlyArray<unknown>,
   path: Path,
   incrementalContext: IncrementalContext,
   deferMap: ReadonlyMap<DeferUsage, DeferredFragment> | undefined,
@@ -350,6 +353,7 @@ export function completeListValue(
         streamUsage,
         itemType,
         fieldDetailsList,
+        result,
         path,
         index,
         incrementalContext,
@@ -375,6 +379,7 @@ export function completeListValue(
       streamUsage,
       itemType,
       fieldDetailsList,
+      result,
       path,
       result.length,
       incrementalContext,
@@ -452,6 +457,7 @@ function buildSubExecutionPlan(
 function collectExecutionGroups(
   context: TransformationContext,
   runtimeType: GraphQLObjectType,
+  result: ObjMap<unknown>,
   path: Path | undefined,
   newGroupedFieldSets: Map<DeferUsageSet, GroupedFieldSet>,
   incrementalContext: IncrementalContext,
@@ -470,6 +476,7 @@ function collectExecutionGroups(
       executeExecutionGroup(
         context,
         pendingExecutionGroup,
+        result,
         path,
         groupedFieldSet,
         runtimeType,
@@ -498,22 +505,20 @@ function getDeferredFragments(
 function executeExecutionGroup(
   context: TransformationContext,
   pendingExecutionGroup: PendingExecutionGroup,
+  result: ObjMap<unknown>,
   path: Path | undefined,
   groupedFieldSet: GroupedFieldSet,
   runtimeType: GraphQLObjectType,
   incrementalContext: IncrementalContext,
   deferMap: ReadonlyMap<DeferUsage, DeferredFragment>,
 ): ExecutionGroupResult {
-  const object = getObjectAtPath(context.mergedResult, pathToArray(path));
-  invariant(isObjectLike(object));
-
   return {
     pendingExecutionGroup,
     data: completeObjectValue(
       context,
       groupedFieldSet,
       runtimeType,
-      object,
+      result,
       path,
       incrementalContext,
       deferMap,
@@ -571,6 +576,7 @@ function maybeAddStream(
   streamUsage: StreamUsage,
   itemType: GraphQLOutputType,
   fieldDetailsList: ReadonlyArray<FieldDetails>,
+  result: ReadonlyArray<unknown>,
   path: Path,
   nextIndex: number,
   incrementalContext: IncrementalContext,
@@ -578,15 +584,11 @@ function maybeAddStream(
   const label = streamUsage.label;
   const originalLabel = context.originalLabels.get(label);
 
-  const source = getObjectAtPath(context.mergedResult, pathToArray(path));
-  invariant(Array.isArray(source));
-
   const stream: Stream = {
     path,
     label,
     pathStr: pathToArray(path).join('.'),
     originalLabel,
-    source,
     result: undefined as unknown as (index: number) => StreamItemsResult,
     nextIndex,
   };
@@ -595,6 +597,7 @@ function maybeAddStream(
     executeStreamItems(
       context,
       stream,
+      result,
       itemType,
       fieldDetailsList.map((details) => ({
         ...details,
@@ -616,6 +619,7 @@ function maybeAddStream(
 function executeStreamItems(
   context: TransformationContext,
   stream: Stream,
+  result: ReadonlyArray<unknown>,
   itemType: GraphQLOutputType,
   fieldDetailsList: ReadonlyArray<FieldDetails>,
   path: Path,
@@ -628,7 +632,7 @@ function executeStreamItems(
       context,
       itemType,
       fieldDetailsList,
-      stream.source,
+      result,
       path,
       incrementalContext,
       undefined,

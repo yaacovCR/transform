@@ -49,7 +49,7 @@ export type LegacyIncrementalResult =
 export interface PayloadPublisher<TInitialPayload, TSubsequentPayload> {
   getInitialPayload: (
     data: ObjMap<unknown>,
-    errors: ReadonlyArray<GraphQLError> | undefined,
+    errors: ReadonlyArray<GraphQLError>,
   ) => TInitialPayload;
   getSubsequentPayloadPublisher: () => SubsequentPayloadPublisher<TSubsequentPayload>;
 }
@@ -85,9 +85,9 @@ export function getPayloadPublisher(): PayloadPublisher<
 
   function getInitialPayload(
     data: ObjMap<unknown>,
-    errors: ReadonlyArray<GraphQLError> | undefined,
+    errors: ReadonlyArray<GraphQLError>,
   ): LegacyInitialIncrementalExecutionResult {
-    return errors === undefined
+    return errors.length === 0
       ? { data, hasNext: true }
       : { errors, data, hasNext: true };
   }

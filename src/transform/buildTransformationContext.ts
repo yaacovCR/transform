@@ -23,7 +23,6 @@ export interface Stream {
   label: string | undefined;
   pathStr: string;
   originalLabel: string | undefined;
-  source: Array<unknown>;
   result: (nextIndex: number) => StreamItemsResult;
   nextIndex: number;
 }
@@ -73,7 +72,6 @@ export interface TransformationContext {
   transformedArgs: ValidatedExecutionArgs;
   originalLabels: Map<string, string | undefined>;
   prefix: string;
-  mergedResult: ObjMap<unknown>;
 }
 
 interface RequestTransformationContext {
@@ -122,7 +120,6 @@ export function buildTransformationContext(
     transformedArgs,
     originalLabels: context.originalLabels,
     prefix,
-    mergedResult: Object.create(null),
   };
 }
 

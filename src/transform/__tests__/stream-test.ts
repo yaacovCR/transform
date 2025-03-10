@@ -2085,6 +2085,10 @@ describe('Execute: legacy stream directive', () => {
             },
             path: ['nestedObject'],
           },
+          {
+            items: [{ id: '2', name: 'Han' }],
+            path: ['nestedObject', 'nestedFriendList', 1],
+          },
         ],
         hasNext: true,
       },
@@ -2095,11 +2099,8 @@ describe('Execute: legacy stream directive', () => {
             path: ['nestedObject', 'nestedFriendList', 2],
           },
           {
-            items: [
-              { id: '2', name: 'Han' },
-              { id: '3', name: 'Leia' },
-            ],
-            path: ['nestedObject', 'nestedFriendList', 1],
+            items: [{ id: '3', name: 'Leia' }],
+            path: ['nestedObject', 'nestedFriendList', 2],
           },
         ],
         hasNext: true,
