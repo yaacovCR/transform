@@ -318,7 +318,7 @@ export class IncrementalPublisher {
 
   private _handleCompletedStream(
     subsequentPayloadPublisher: SubsequentPayloadPublisher<LegacySubsequentIncrementalExecutionResult>,
-    errors: ReadonlyArray<GraphQLError> | false | undefined,
+    errors: ReadonlyArray<GraphQLError> | undefined,
     stream: Stream,
   ): void {
     if (Array.isArray(errors)) {
@@ -329,7 +329,7 @@ export class IncrementalPublisher {
 
   private _handleCompletedDeferredFragment(
     subsequentPayloadPublisher: SubsequentPayloadPublisher<LegacySubsequentIncrementalExecutionResult>,
-    errors: ReadonlyArray<GraphQLError> | false | undefined,
+    errors: ReadonlyArray<GraphQLError> | undefined,
     deferredFragment: DeferredFragment,
   ): void {
     if (Array.isArray(errors)) {
