@@ -214,7 +214,7 @@ export class IncrementalPublisher {
       // TODO: add test case - original executor completes stream early with errors
       /* c8 ignore start */
       if (maybeErrors !== undefined) {
-        this._handleCompletedStream(
+        this._handleCompletedOriginalStream(
           subsequentPayloadPublisher,
           maybeErrors,
           newRootNode,
@@ -226,7 +226,7 @@ export class IncrementalPublisher {
     }
   }
 
-  private _handleCompletedStream(
+  private _handleCompletedOriginalStream(
     subsequentPayloadPublisher: SubsequentPayloadPublisher<LegacySubsequentIncrementalExecutionResult>,
     errors: ReadonlyArray<GraphQLError> | undefined,
     stream: Stream,
@@ -262,7 +262,7 @@ export class IncrementalPublisher {
     }
 
     if (completed) {
-      this._handleCompletedDeferredFragment(
+      this._handleCompletedOriginalDeferredFragment(
         subsequentPayloadPublisher,
         errors,
         newRootNode,
@@ -271,7 +271,7 @@ export class IncrementalPublisher {
     }
   }
 
-  private _handleCompletedDeferredFragment(
+  private _handleCompletedOriginalDeferredFragment(
     subsequentPayloadPublisher: SubsequentPayloadPublisher<LegacySubsequentIncrementalExecutionResult>,
     errors: ReadonlyArray<GraphQLError> | undefined,
     deferredFragment: DeferredFragment,
@@ -345,7 +345,7 @@ export class IncrementalPublisher {
     }
 
     for (const stream of streams) {
-      this._handleCompletedStream(
+      this._handleCompletedOriginalStream(
         subsequentPayloadPublisher,
         pendingResult.completed,
         stream,
@@ -367,7 +367,7 @@ export class IncrementalPublisher {
       return;
     }
 
-    this._handleCompletedDeferredFragment(
+    this._handleCompletedOriginalDeferredFragment(
       subsequentPayloadPublisher,
       pendingResult.completed,
       deferredFragment,
