@@ -169,46 +169,81 @@ export class IncrementalPublisher {
     );
 
     if (isStream(newRootNode)) {
-      const nextIndex = newRootNode.nextIndex;
-      const streamItemsResult = newRootNode.result(nextIndex);
-      const numItems = streamItemsResult.items.length;
-      if (numItems > 0) {
-        this._incrementalGraph.addIncrementalDataRecords(
-          streamItemsResult.incrementalDataRecords,
-        );
-        subsequentPayloadPublisher.addStreamItems(
-          newRootNode,
-          streamItemsResult,
-        );
-        newRootNode.nextIndex += numItems;
-      }
-
-      // TODO: add test case - original executor completes stream early normally
-      /* c8 ignore next 4 */
-      if (pendingResultsByPath === undefined) {
-        this._incrementalGraph.removeStream(newRootNode);
-        return;
-      }
-
-      for (const pendingResult of pendingResultsByPath.values()) {
-        const maybeErrors = pendingResult.completed;
-        // TODO: add test case - original executor completes stream early with errors
-        /* c8 ignore start */
-        if (maybeErrors !== undefined) {
-          this._handleCompletedStream(
-            subsequentPayloadPublisher,
-            maybeErrors,
-            newRootNode,
-          );
-          this._incrementalGraph.removeStream(newRootNode);
-          return;
-        }
-        /* c8 ignore stop */
-      }
-
+      this._handleNewStream(
+        newRootNode,
+        pendingResultsByPath,
+        subsequentPayloadPublisher,
+      );
       return;
     }
 
+    this._handleNewDeferredFragment(
+      newRootNode,
+      pendingResultsByPath,
+      subsequentPayloadPublisher,
+    );
+  }
+
+  private _handleNewStream(
+    newRootNode: Stream,
+    pendingResultsByPath:
+      | ReadonlyMap<string, EncounteredPendingResult>
+      | undefined,
+    subsequentPayloadPublisher: SubsequentPayloadPublisher<LegacySubsequentIncrementalExecutionResult>,
+  ): void {
+    const nextIndex = newRootNode.nextIndex;
+    const streamItemsResult = newRootNode.result(nextIndex);
+    const numItems = streamItemsResult.items.length;
+    if (numItems > 0) {
+      this._incrementalGraph.addIncrementalDataRecords(
+        streamItemsResult.incrementalDataRecords,
+      );
+      subsequentPayloadPublisher.addStreamItems(newRootNode, streamItemsResult);
+      newRootNode.nextIndex += numItems;
+    }
+
+    // TODO: add test case - original executor completes stream early normally
+    /* c8 ignore next 4 */
+    if (pendingResultsByPath === undefined) {
+      this._incrementalGraph.removeStream(newRootNode);
+      return;
+    }
+
+    for (const pendingResult of pendingResultsByPath.values()) {
+      const maybeErrors = pendingResult.completed;
+      // TODO: add test case - original executor completes stream early with errors
+      /* c8 ignore start */
+      if (maybeErrors !== undefined) {
+        this._handleCompletedStream(
+          subsequentPayloadPublisher,
+          maybeErrors,
+          newRootNode,
+        );
+        this._incrementalGraph.removeStream(newRootNode);
+        return;
+      }
+      /* c8 ignore stop */
+    }
+  }
+
+  private _handleCompletedStream(
+    subsequentPayloadPublisher: SubsequentPayloadPublisher<LegacySubsequentIncrementalExecutionResult>,
+    errors: ReadonlyArray<GraphQLError> | undefined,
+    stream: Stream,
+  ): void {
+    if (Array.isArray(errors)) {
+      subsequentPayloadPublisher.addFailedStream(stream, errors);
+    }
+    this._incrementalGraph.removeStream(stream);
+  }
+
+  private _handleNewDeferredFragment(
+    newRootNode: DeferredFragment,
+    pendingResultsByPath:
+      | ReadonlyMap<string, EncounteredPendingResult>
+      | undefined,
+    subsequentPayloadPublisher: SubsequentPayloadPublisher<LegacySubsequentIncrementalExecutionResult>,
+  ): void {
     const label = newRootNode.label;
     invariant(label != null);
     const pendingResult = pendingResultsByPath?.get(label);
@@ -233,6 +268,29 @@ export class IncrementalPublisher {
         newRootNode,
       );
       this._incrementalGraph.removeDeferredFragment(newRootNode);
+    }
+  }
+
+  private _handleCompletedDeferredFragment(
+    subsequentPayloadPublisher: SubsequentPayloadPublisher<LegacySubsequentIncrementalExecutionResult>,
+    errors: ReadonlyArray<GraphQLError> | undefined,
+    deferredFragment: DeferredFragment,
+  ): void {
+    if (Array.isArray(errors)) {
+      subsequentPayloadPublisher.addFailedDeferredFragment(
+        deferredFragment,
+        errors,
+      );
+      this._incrementalGraph.removeDeferredFragment(deferredFragment);
+    } else {
+      const executionGroupResults =
+        this._incrementalGraph.completeDeferredFragment(deferredFragment);
+      if (executionGroupResults !== undefined) {
+        subsequentPayloadPublisher.addSuccessfulDeferredFragment(
+          deferredFragment,
+          executionGroupResults,
+        );
+      }
     }
   }
 
@@ -314,40 +372,6 @@ export class IncrementalPublisher {
       pendingResult.completed,
       deferredFragment,
     );
-  }
-
-  private _handleCompletedStream(
-    subsequentPayloadPublisher: SubsequentPayloadPublisher<LegacySubsequentIncrementalExecutionResult>,
-    errors: ReadonlyArray<GraphQLError> | undefined,
-    stream: Stream,
-  ): void {
-    if (Array.isArray(errors)) {
-      subsequentPayloadPublisher.addFailedStream(stream, errors);
-    }
-    this._incrementalGraph.removeStream(stream);
-  }
-
-  private _handleCompletedDeferredFragment(
-    subsequentPayloadPublisher: SubsequentPayloadPublisher<LegacySubsequentIncrementalExecutionResult>,
-    errors: ReadonlyArray<GraphQLError> | undefined,
-    deferredFragment: DeferredFragment,
-  ): void {
-    if (Array.isArray(errors)) {
-      subsequentPayloadPublisher.addFailedDeferredFragment(
-        deferredFragment,
-        errors,
-      );
-      this._incrementalGraph.removeDeferredFragment(deferredFragment);
-    } else {
-      const executionGroupResults =
-        this._incrementalGraph.completeDeferredFragment(deferredFragment);
-      if (executionGroupResults !== undefined) {
-        subsequentPayloadPublisher.addSuccessfulDeferredFragment(
-          deferredFragment,
-          executionGroupResults,
-        );
-      }
-    }
   }
 
   private async _returnAsyncIterators(
