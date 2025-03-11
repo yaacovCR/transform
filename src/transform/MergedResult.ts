@@ -142,17 +142,26 @@ export class MergedResult {
         pendingResult.completed = completedResult.errors;
       }
 
+      this._pendingResultsById.delete(pendingResult.id);
+
       if (pendingResult.type === 'stream') {
         onCompletedStream(pendingResult);
 
+        // we can clean up in the non-error case as if result was inlined
+        // but otherwise we might complete early, and we may need to
+        // retain errors for publisher to send
         if (pendingResult.completed === undefined) {
-          // we cannot clean this up in the case of errors, because in branching mode,
-          // there may be a deferred version of the stream for which we will need to send errors
           this._pendingResultsByPath.delete(pendingResult.pathStr);
         }
-      } else {
-        onCompletedDeferredFragment(pendingResult);
+        continue;
+      }
 
+      onCompletedDeferredFragment(pendingResult);
+
+      // we can clean up in the non-error case as if result was inlined
+      // but otherwise we might complete early, and we may need to
+      // retain errors for publisher to send
+      if (pendingResult.completed === undefined) {
         const pendingResultsByPath = this._pendingResultsByPath.get(
           pendingResult.pathStr,
         );
@@ -162,7 +171,6 @@ export class MergedResult {
           this._pendingResultsByPath.delete(pendingResult.pathStr);
         }
       }
-      this._pendingResultsById.delete(pendingResult.id);
     }
   }
 
