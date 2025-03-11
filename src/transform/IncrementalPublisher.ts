@@ -115,13 +115,13 @@ export class IncrementalPublisher {
 
         // eslint-disable-next-line no-await-in-loop
         const next = await subsequentResults.next();
-        const value = next.value as SubsequentIncrementalExecutionResult;
-        if (value === undefined) {
+
+        if (isDone) {
           return { value: undefined, done: true };
         }
 
         this._onSubsequentIncrementalExecutionResult(
-          value,
+          next.value,
           subsequentPayloadPublisher,
         );
       }
