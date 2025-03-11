@@ -164,7 +164,7 @@ export class IncrementalPublisher {
     newRootNode: SubsequentResultRecord,
     subsequentPayloadPublisher: SubsequentPayloadPublisher<LegacySubsequentIncrementalExecutionResult>,
   ): void {
-    const encounteredResultsByPath = this._mergedResult.getPendingResultsByPath(
+    const pendingResultsByPath = this._mergedResult.getPendingResultsByPath(
       newRootNode.pathStr,
     );
 
@@ -185,13 +185,13 @@ export class IncrementalPublisher {
 
       // TODO: add test case - original executor completes stream early normally
       /* c8 ignore next 4 */
-      if (encounteredResultsByPath === undefined) {
+      if (pendingResultsByPath === undefined) {
         this._incrementalGraph.removeStream(newRootNode);
         return;
       }
 
-      for (const encounteredPendingResult of encounteredResultsByPath.values()) {
-        const maybeErrors = encounteredPendingResult.completed;
+      for (const pendingResult of pendingResultsByPath.values()) {
+        const maybeErrors = pendingResult.completed;
         // TODO: add test case - original executor completes stream early with errors
         /* c8 ignore start */
         if (maybeErrors !== undefined) {
@@ -211,12 +211,12 @@ export class IncrementalPublisher {
 
     const label = newRootNode.label;
     invariant(label != null);
-    const encounteredPendingResult = encounteredResultsByPath?.get(label);
+    const pendingResult = pendingResultsByPath?.get(label);
 
     let completed = true;
     let errors: ReadonlyArray<GraphQLError> | undefined;
-    if (encounteredPendingResult !== undefined) {
-      const maybeErrors = encounteredPendingResult.completed;
+    if (pendingResult !== undefined) {
+      const maybeErrors = pendingResult.completed;
       if (maybeErrors === undefined) {
         completed = false;
       } /* c8 ignore start */ else {

@@ -28,22 +28,22 @@ export interface EncounteredPendingResult {
  */
 export class MergedResult {
   private _mergedResult: ObjMap<unknown>;
-  private _encounteredResultsById: Map<string, EncounteredPendingResult>;
-  private _encounteredResultsByPath: Map<
+  private _pendingResultsById: Map<string, EncounteredPendingResult>;
+  private _pendingResultsByPath: Map<
     string,
     Map<string, EncounteredPendingResult>
   >;
 
   constructor(originalData: ObjMap<unknown>) {
     this._mergedResult = originalData;
-    this._encounteredResultsById = new Map();
-    this._encounteredResultsByPath = new Map();
+    this._pendingResultsById = new Map();
+    this._pendingResultsByPath = new Map();
   }
 
   getPendingResultsByPath(
     pathStr: string,
   ): ReadonlyMap<string, EncounteredPendingResult> | undefined {
-    return this._encounteredResultsByPath.get(pathStr);
+    return this._pendingResultsByPath.get(pathStr);
   }
 
   processPending(
@@ -56,7 +56,7 @@ export class MergedResult {
       invariant(label != null);
       const pathStr = path.join('.');
       const key = label + '.' + pathStr;
-      const encounteredPendingResult: EncounteredPendingResult = {
+      const newPendingResult: EncounteredPendingResult = {
         id,
         path,
         label,
@@ -65,15 +65,14 @@ export class MergedResult {
         type: undefined,
         completed: undefined,
       };
-      newPendingResults.push(encounteredPendingResult);
-      this._encounteredResultsById.set(id, encounteredPendingResult);
-      let encounteredResultsByPath =
-        this._encounteredResultsByPath.get(pathStr);
-      if (encounteredResultsByPath === undefined) {
-        encounteredResultsByPath = new Map();
-        this._encounteredResultsByPath.set(pathStr, encounteredResultsByPath);
+      newPendingResults.push(newPendingResult);
+      this._pendingResultsById.set(id, newPendingResult);
+      let pendingResultsByPath = this._pendingResultsByPath.get(pathStr);
+      if (pendingResultsByPath === undefined) {
+        pendingResultsByPath = new Map();
+        this._pendingResultsByPath.set(pathStr, pendingResultsByPath);
       }
-      encounteredResultsByPath.set(label, encounteredPendingResult);
+      pendingResultsByPath.set(label, newPendingResult);
     }
     if (skipTyping) {
       return newPendingResults;
@@ -136,9 +135,7 @@ export class MergedResult {
     ) => void,
   ): void {
     for (const completedResult of completedResults) {
-      const pendingResult = this._encounteredResultsById.get(
-        completedResult.id,
-      );
+      const pendingResult = this._pendingResultsById.get(completedResult.id);
       invariant(pendingResult != null);
 
       if ('errors' in completedResult) {
@@ -151,32 +148,32 @@ export class MergedResult {
         if (pendingResult.completed === undefined) {
           // we cannot clean this up in the case of errors, because in branching mode,
           // there may be a deferred version of the stream for which we will need to send errors
-          this._encounteredResultsByPath.delete(pendingResult.pathStr);
+          this._pendingResultsByPath.delete(pendingResult.pathStr);
         }
       } else {
         onCompletedDeferredFragment(pendingResult);
 
-        const encounteredResultsByPath = this._encounteredResultsByPath.get(
+        const pendingResultsByPath = this._pendingResultsByPath.get(
           pendingResult.pathStr,
         );
-        invariant(encounteredResultsByPath != null);
-        encounteredResultsByPath.delete(pendingResult.label);
-        if (encounteredResultsByPath.size === 0) {
-          this._encounteredResultsByPath.delete(pendingResult.pathStr);
+        invariant(pendingResultsByPath != null);
+        pendingResultsByPath.delete(pendingResult.label);
+        if (pendingResultsByPath.size === 0) {
+          this._pendingResultsByPath.delete(pendingResult.pathStr);
         }
       }
-      this._encounteredResultsById.delete(pendingResult.id);
+      this._pendingResultsById.delete(pendingResult.id);
     }
   }
 
   private _onIncremental(
     incrementalResults: ReadonlyArray<IncrementalResult>,
-    onStream: (encounteredPendingResult: EncounteredPendingResult) => void,
+    onStream: (pendingResult: EncounteredPendingResult) => void,
   ): void {
     const streams = new Set<EncounteredPendingResult>();
     for (const incrementalResult of incrementalResults) {
       const id = incrementalResult.id;
-      const pendingResult = this._encounteredResultsById.get(id);
+      const pendingResult = this._pendingResultsById.get(id);
       invariant(pendingResult != null);
       const path = incrementalResult.subPath
         ? [...pendingResult.path, ...incrementalResult.subPath]
