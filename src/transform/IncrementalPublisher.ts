@@ -1,7 +1,5 @@
 import type { GraphQLError } from 'graphql';
 import type {
-  CompletedResult,
-  IncrementalResult,
   PendingResult,
   SubsequentIncrementalExecutionResult,
   // eslint-disable-next-line n/no-missing-import
@@ -17,9 +15,9 @@ import type {
   SubsequentResultRecord,
 } from './buildTransformationContext.js';
 import { isStream } from './buildTransformationContext.js';
-import { embedErrors } from './embedErrors.js';
-import { getObjectAtPath } from './getObjectAtPath.js';
 import { IncrementalGraph } from './IncrementalGraph.js';
+import type { EncounteredPendingResult } from './MergedResult.js';
+import { MergedResult } from './MergedResult.js';
 import type {
   LegacyExperimentalIncrementalExecutionResults,
   LegacyInitialIncrementalExecutionResult,
@@ -29,15 +27,6 @@ import type {
 } from './PayloadPublisher.js';
 import { getPayloadPublisher } from './PayloadPublisher.js';
 
-interface EncounteredPendingResult {
-  id: string;
-  path: ReadonlyArray<string | number>;
-  label: string;
-  pathStr: string;
-  key: string;
-  completed: undefined | ReadonlyArray<GraphQLError>;
-}
-
 /**
  * This class is used to publish incremental results to the client, enabling semi-concurrent
  * execution while preserving result order.
@@ -45,24 +34,17 @@ interface EncounteredPendingResult {
  * @internal
  */
 export class IncrementalPublisher {
-  private _mergedResult: ObjMap<unknown>;
+  private _mergedResult: MergedResult;
   private _incrementalGraph: IncrementalGraph;
   private _payloadPublisher: PayloadPublisher<
     LegacyInitialIncrementalExecutionResult,
     LegacySubsequentIncrementalExecutionResult
   >;
-  private _encounteredResultsById: Map<string, EncounteredPendingResult>;
-  private _encounteredResultsByPath: Map<
-    string,
-    Map<string, EncounteredPendingResult>
-  >;
 
   constructor(originalData: ObjMap<unknown>) {
-    this._mergedResult = originalData;
+    this._mergedResult = new MergedResult(originalData);
     this._payloadPublisher = getPayloadPublisher();
     this._incrementalGraph = new IncrementalGraph();
-    this._encounteredResultsById = new Map();
-    this._encounteredResultsByPath = new Map();
   }
 
   buildResponse(
@@ -75,7 +57,7 @@ export class IncrementalPublisher {
     subsequentResults?: AsyncGenerator<SubsequentIncrementalExecutionResult>,
   ): LegacyExperimentalIncrementalExecutionResults {
     if (pending != null) {
-      this._processPending(pending);
+      this._mergedResult.processPending(pending);
     }
 
     const { data, errors, incrementalDataRecords } = initialResult;
@@ -86,31 +68,6 @@ export class IncrementalPublisher {
       initialResult: this._payloadPublisher.getInitialPayload(data, errors),
       subsequentResults: this._subscribe(subsequentResults),
     };
-  }
-
-  private _processPending(pendingResults: ReadonlyArray<PendingResult>): void {
-    for (const pendingResult of pendingResults) {
-      const { id, path, label } = pendingResult;
-      invariant(label != null);
-      const pathStr = path.join('.');
-      const key = label + '.' + pathStr;
-      const encounteredPendingResult: EncounteredPendingResult = {
-        id,
-        path,
-        label,
-        pathStr,
-        key,
-        completed: undefined,
-      };
-      this._encounteredResultsById.set(id, encounteredPendingResult);
-      let encounteredResultsByPath =
-        this._encounteredResultsByPath.get(pathStr);
-      if (encounteredResultsByPath === undefined) {
-        encounteredResultsByPath = new Map();
-        this._encounteredResultsByPath.set(pathStr, encounteredResultsByPath);
-      }
-      encounteredResultsByPath.set(label, encounteredPendingResult);
-    }
   }
 
   private _subscribe(
@@ -163,38 +120,10 @@ export class IncrementalPublisher {
           return { value: undefined, done: true };
         }
 
-        if (value.pending != null) {
-          this._processPending(value.pending);
-        }
-
-        if (value.incremental != null) {
-          const pendingStreamResults = this._processIncremental(
-            value.incremental,
-          );
-          for (const pendingStreamResult of pendingStreamResults) {
-            const streams = this._incrementalGraph.getStreams(
-              pendingStreamResult.pathStr,
-            );
-            if (streams != null) {
-              for (const stream of streams) {
-                const nextIndex = stream.nextIndex;
-                const streamItemsResult = stream.result(nextIndex);
-                this._incrementalGraph.addIncrementalDataRecords(
-                  streamItemsResult.incrementalDataRecords,
-                );
-                subsequentPayloadPublisher.addStreamItems(
-                  stream,
-                  streamItemsResult,
-                );
-                stream.nextIndex += streamItemsResult.items.length;
-              }
-            }
-          }
-        }
-
-        if (value.completed != null) {
-          this._processCompleted(value.completed, subsequentPayloadPublisher);
-        }
+        this._onSubsequentIncrementalExecutionResult(
+          value,
+          subsequentPayloadPublisher,
+        );
       }
     };
 
@@ -235,7 +164,7 @@ export class IncrementalPublisher {
     newRootNode: SubsequentResultRecord,
     subsequentPayloadPublisher: SubsequentPayloadPublisher<LegacySubsequentIncrementalExecutionResult>,
   ): void {
-    const encounteredResultsByPath = this._encounteredResultsByPath.get(
+    const encounteredResultsByPath = this._mergedResult.getPendingResultsByPath(
       newRootNode.pathStr,
     );
 
@@ -254,7 +183,7 @@ export class IncrementalPublisher {
         newRootNode.nextIndex += numItems;
       }
 
-      // TODO: add test case - executor completes stream early normally
+      // TODO: add test case - original executor completes stream early normally
       /* c8 ignore next 4 */
       if (encounteredResultsByPath === undefined) {
         this._incrementalGraph.removeStream(newRootNode);
@@ -263,7 +192,7 @@ export class IncrementalPublisher {
 
       for (const encounteredPendingResult of encounteredResultsByPath.values()) {
         const maybeErrors = encounteredPendingResult.completed;
-        // TODO: add test case - executor completes stream early with errors
+        // TODO: add test case - original executor completes stream early with errors
         /* c8 ignore start */
         if (maybeErrors !== undefined) {
           this._handleCompletedStream(
@@ -291,7 +220,7 @@ export class IncrementalPublisher {
       if (maybeErrors === undefined) {
         completed = false;
       } /* c8 ignore start */ else {
-        // TODO: add test case - executor completes fragment early with errors
+        // TODO: add test case - original executor completes fragment early with errors
         errors = maybeErrors;
       }
       /* c8 ignore stop */
@@ -307,97 +236,84 @@ export class IncrementalPublisher {
     }
   }
 
-  private _processIncremental(
-    incrementalResults: ReadonlyArray<IncrementalResult>,
-  ): ReadonlyArray<EncounteredPendingResult> {
-    const incrementalStreamResults: Array<EncounteredPendingResult> = [];
-    for (const incrementalResult of incrementalResults) {
-      const id = incrementalResult.id;
-      const pendingResult = this._encounteredResultsById.get(id);
-      invariant(pendingResult != null);
-      const path = incrementalResult.subPath
-        ? [...pendingResult.path, ...incrementalResult.subPath]
-        : pendingResult.path;
-
-      const incompleteAtPath = getObjectAtPath(this._mergedResult, path);
-      if (Array.isArray(incompleteAtPath)) {
-        invariant('items' in incrementalResult);
-        incompleteAtPath.push(
-          ...(incrementalResult.items as ReadonlyArray<unknown>),
-        );
-        embedErrors(this._mergedResult, incrementalResult.errors);
-        incrementalStreamResults.push(pendingResult);
-      } else {
-        invariant('data' in incrementalResult);
-        for (const [key, value] of Object.entries(
-          incrementalResult.data as ObjMap<unknown>,
-        )) {
-          incompleteAtPath[key] = value;
-        }
-        embedErrors(this._mergedResult, incrementalResult.errors);
-      }
-    }
-    return incrementalStreamResults;
-  }
-
-  private _processCompleted(
-    completedResults: ReadonlyArray<CompletedResult>,
+  private _onSubsequentIncrementalExecutionResult(
+    subsequentIncrementalExecutionResult: SubsequentIncrementalExecutionResult,
     subsequentPayloadPublisher: SubsequentPayloadPublisher<LegacySubsequentIncrementalExecutionResult>,
   ): void {
-    for (const completedResult of completedResults) {
-      const id = completedResult.id;
-      const pendingResult = this._encounteredResultsById.get(id);
-      this._encounteredResultsById.delete(id);
-
-      invariant(pendingResult != null);
-      const streams = this._incrementalGraph.getStreams(pendingResult.pathStr);
-
-      if ('errors' in completedResult) {
-        pendingResult.completed = completedResult.errors;
-      }
-
-      if (streams !== undefined) {
-        for (const stream of streams) {
-          this._handleCompletedStream(
-            subsequentPayloadPublisher,
-            pendingResult.completed,
-            stream,
-          );
+    this._mergedResult.onSubsequentIncrementalExecutionResult(
+      subsequentIncrementalExecutionResult,
+      (pendingStreamResult) => {
+        const streams = this._incrementalGraph.getStreams(
+          pendingStreamResult.pathStr,
+        );
+        if (streams != null) {
+          for (const stream of streams) {
+            const nextIndex = stream.nextIndex;
+            const streamItemsResult = stream.result(nextIndex);
+            this._incrementalGraph.addIncrementalDataRecords(
+              streamItemsResult.incrementalDataRecords,
+            );
+            subsequentPayloadPublisher.addStreamItems(
+              stream,
+              streamItemsResult,
+            );
+            stream.nextIndex += streamItemsResult.items.length;
+          }
         }
+      },
+      (pendingResult) =>
+        this._onCompletedOriginalStream(
+          pendingResult,
+          subsequentPayloadPublisher,
+        ),
+      (pendingResult) =>
+        this._onCompletedOriginalDeferredFragment(
+          pendingResult,
+          subsequentPayloadPublisher,
+        ),
+    );
+  }
 
-        if (pendingResult.completed === undefined) {
-          // we cannot clean this up in the case of errors, because in branching mode,
-          // there may be a deferred version of the stream for which we will need to send errors
-          this._encounteredResultsByPath.delete(pendingResult.pathStr);
-        }
+  private _onCompletedOriginalStream(
+    pendingResult: EncounteredPendingResult,
+    subsequentPayloadPublisher: SubsequentPayloadPublisher<LegacySubsequentIncrementalExecutionResult>,
+  ): void {
+    const streams = this._incrementalGraph.getStreams(pendingResult.pathStr);
 
-        continue;
-      }
+    // TODO: add test case - original executor completes pending result early, not found in graph
+    /* c8 ignore next 3 */
+    if (streams === undefined) {
+      return;
+    }
 
-      const key = pendingResult.key;
-      const deferredFragment = this._incrementalGraph.getDeferredFragment(key);
-
-      // TODO: add test case - executor completes pending result early, not found in graph as stream or deferred fragment
-      /* c8 ignore next 3 */
-      if (deferredFragment === undefined) {
-        continue;
-      }
-
-      this._handleCompletedDeferredFragment(
+    for (const stream of streams) {
+      this._handleCompletedStream(
         subsequentPayloadPublisher,
         pendingResult.completed,
-        deferredFragment,
+        stream,
       );
-
-      const encounteredResultsByPath = this._encounteredResultsByPath.get(
-        pendingResult.pathStr,
-      );
-      invariant(encounteredResultsByPath != null);
-      encounteredResultsByPath.delete(pendingResult.label);
-      if (encounteredResultsByPath.size === 0) {
-        this._encounteredResultsByPath.delete(pendingResult.pathStr);
-      }
     }
+  }
+
+  private _onCompletedOriginalDeferredFragment(
+    pendingResult: EncounteredPendingResult,
+    subsequentPayloadPublisher: SubsequentPayloadPublisher<LegacySubsequentIncrementalExecutionResult>,
+  ): void {
+    const deferredFragment = this._incrementalGraph.getDeferredFragment(
+      pendingResult.key,
+    );
+
+    // TODO: add test case - original executor completes pending result early, not found in graph
+    /* c8 ignore next 3 */
+    if (deferredFragment === undefined) {
+      return;
+    }
+
+    this._handleCompletedDeferredFragment(
+      subsequentPayloadPublisher,
+      pendingResult.completed,
+      deferredFragment,
+    );
   }
 
   private _handleCompletedStream(
