@@ -3,6 +3,7 @@ import { describe, it } from 'mocha';
 
 import { expectJSON } from '../../__testUtils__/expectJSON.js';
 
+import { EmbeddedErrors } from '../EmbeddedError.js';
 import { embedErrors } from '../embedErrors.js';
 
 describe('embedErrors', () => {
@@ -11,7 +12,7 @@ describe('embedErrors', () => {
     const data = { a: { b: { c: null } } };
     embedErrors(data, [error]);
     expectJSON(data).toDeepEqual({
-      a: { b: { c: new AggregateError([error]) } },
+      a: { b: { c: new EmbeddedErrors([error]) } },
     });
   });
 
@@ -22,7 +23,7 @@ describe('embedErrors', () => {
     const data = { a: { b: { c: null } } };
     embedErrors(data, [error]);
     expectJSON(data).toDeepEqual({
-      a: { b: { c: new AggregateError([error]) } },
+      a: { b: { c: new EmbeddedErrors([error]) } },
     });
   });
 
@@ -36,7 +37,7 @@ describe('embedErrors', () => {
     const data = { a: { b: { c: null } } };
     embedErrors(data, [error1, error2]);
     expectJSON(data).toDeepEqual({
-      a: { b: { c: new AggregateError([error1, error2]) } },
+      a: { b: { c: new EmbeddedErrors([error1, error2]) } },
     });
   });
 

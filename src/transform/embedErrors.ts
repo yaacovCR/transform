@@ -4,6 +4,8 @@ import { invariant } from '../jsutils/invariant.js';
 import { isObjectLike } from '../jsutils/isObjectLike.js';
 import type { ObjMap } from '../jsutils/ObjMap.js';
 
+import { EmbeddedErrors } from './EmbeddedError.js';
+
 export function embedErrors(
   data: ObjMap<unknown> | null,
   errors: ReadonlyArray<GraphQLError> | undefined,
@@ -36,7 +38,7 @@ function embedErrorByPath(
           parent as unknown as ObjMap<unknown>,
           currentKey as unknown as string,
           error,
-        ) instanceof AggregateError,
+        ) instanceof EmbeddedErrors,
       );
       return;
     }
@@ -45,7 +47,7 @@ function embedErrorByPath(
         return;
       }
       invariant(
-        maybeEmbed(parent, currentKey, error) instanceof AggregateError,
+        maybeEmbed(parent, currentKey, error) instanceof EmbeddedErrors,
       );
       return;
     }
@@ -62,7 +64,7 @@ function embedErrorByPath(
       currentKey as unknown as string,
       error,
     );
-    if (next instanceof AggregateError) {
+    if (next instanceof EmbeddedErrors) {
       return;
     }
   } else if (isObjectLike(parent)) {
@@ -70,7 +72,7 @@ function embedErrorByPath(
       return;
     }
     next = maybeEmbed(parent, currentKey, error);
-    if (next instanceof AggregateError) {
+    if (next instanceof EmbeddedErrors) {
       return;
     }
   } else {
@@ -87,8 +89,8 @@ function maybeEmbed(
 ): unknown {
   let next = parent[key];
   if (next == null) {
-    next = parent[key] = new AggregateError([error]);
-  } else if (next instanceof AggregateError) {
+    next = parent[key] = new EmbeddedErrors([error]);
+  } else if (next instanceof EmbeddedErrors) {
     next.errors.push(error);
   }
   return next;

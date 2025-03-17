@@ -45,6 +45,7 @@ import type {
   StreamItemResult,
   TransformationContext,
 } from './buildTransformationContext.js';
+import { EmbeddedErrors } from './EmbeddedError.js';
 
 interface IncrementalContext {
   errors: Map<Path | undefined, GraphQLError>;
@@ -211,7 +212,7 @@ function completeValue(
     return null;
   }
 
-  if (result instanceof AggregateError) {
+  if (result instanceof EmbeddedErrors) {
     const errors = incrementalContext.errors;
     for (const error of result.errors) {
       errors.set(path, error);
