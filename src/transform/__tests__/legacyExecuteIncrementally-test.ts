@@ -119,10 +119,6 @@ describe('legacyExecuteIncrementally', () => {
       {
         incremental: [
           {
-            data: { someField: 'someField', anotherField: 'anotherField' },
-            path: ['someObjectField'],
-          },
-          {
             data: null,
             errors: [
               {
@@ -132,6 +128,10 @@ describe('legacyExecuteIncrementally', () => {
                 path: ['someObjectField', 'nonNullableField'],
               },
             ],
+            path: ['someObjectField'],
+          },
+          {
+            data: { someField: 'someField', anotherField: 'anotherField' },
             path: ['someObjectField'],
           },
         ],

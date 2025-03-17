@@ -1591,10 +1591,6 @@ describe('Execute: legacy defer directive format', () => {
       {
         incremental: [
           {
-            data: { a: { b: { c: { d: 'd' } } } },
-            path: [],
-          },
-          {
             data: null,
             errors: [
               {
@@ -1605,6 +1601,10 @@ describe('Execute: legacy defer directive format', () => {
               },
             ],
             path: ['a'],
+          },
+          {
+            data: { a: { b: { c: { d: 'd' } } } },
+            path: [],
           },
         ],
         hasNext: false,

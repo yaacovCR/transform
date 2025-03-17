@@ -26,6 +26,7 @@ import {
 // eslint-disable-next-line n/no-missing-import
 import { pathToArray } from 'graphql/jsutils/Path.js';
 
+import { BoxedPromiseOrValue } from '../jsutils/BoxedPromiseOrValue.js';
 import { invariant } from '../jsutils/invariant.js';
 import { isObjectLike } from '../jsutils/isObjectLike.js';
 import { memoize3 } from '../jsutils/memoize3.js';
@@ -41,7 +42,7 @@ import type {
   IncrementalDataRecord,
   PendingExecutionGroup,
   Stream,
-  StreamItemsResult,
+  StreamItemResult,
   TransformationContext,
 } from './buildTransformationContext.js';
 
@@ -337,16 +338,10 @@ export function completeListValue(
   path: Path,
   incrementalContext: IncrementalContext,
   deferMap: ReadonlyMap<DeferUsage, DeferredFragment> | undefined,
-  initialIndex?: number,
 ): Array<unknown> {
-  const streamUsage = getStreamUsage(
-    context,
-    fieldDetailsList,
-    path,
-    initialIndex,
-  );
+  const streamUsage = getStreamUsage(context, fieldDetailsList, path);
   const completedItems = [];
-  for (let index = initialIndex ?? 0; index < result.length; index++) {
+  for (let index = 0; index < result.length; index++) {
     if (streamUsage && index >= streamUsage.initialCount) {
       maybeAddStream(
         context,
@@ -418,6 +413,7 @@ function getNewDeferMap(
       parent,
       originalLabel: context.originalLabels.get(label),
       pendingExecutionGroups: new Set(),
+      successfulExecutionGroups: new Set(),
       children: [],
     };
 
@@ -469,23 +465,26 @@ function collectExecutionGroups(
     const pendingExecutionGroup: PendingExecutionGroup = {
       path,
       deferredFragments,
-      result: undefined as unknown as () => ExecutionGroupResult,
+      result:
+        undefined as unknown as () => BoxedPromiseOrValue<ExecutionGroupResult>,
     };
 
     pendingExecutionGroup.result = () =>
-      executeExecutionGroup(
-        context,
-        pendingExecutionGroup,
-        result,
-        path,
-        groupedFieldSet,
-        runtimeType,
-        {
-          errors: new Map(),
-          incrementalDataRecords: [],
-          deferUsageSet,
-        },
-        deferMap,
+      new BoxedPromiseOrValue(
+        executeExecutionGroup(
+          context,
+          pendingExecutionGroup,
+          result,
+          path,
+          groupedFieldSet,
+          runtimeType,
+          {
+            errors: new Map(),
+            incrementalDataRecords: [],
+            deferUsageSet,
+          },
+          deferMap,
+        ),
       );
 
     incrementalContext.incrementalDataRecords.push(pendingExecutionGroup);
@@ -523,7 +522,7 @@ function executeExecutionGroup(
       incrementalContext,
       deferMap,
     ),
-    errors: incrementalContext.errors,
+    errors: Array.from(incrementalContext.errors.values()),
     incrementalDataRecords: filterIncrementalDataRecords(
       pendingExecutionGroup.path,
       incrementalContext.errors,
@@ -536,13 +535,7 @@ function getStreamUsage(
   context: TransformationContext,
   fieldDetailsList: ReadonlyArray<FieldDetails>,
   path: Path,
-  initialIndex: number | undefined,
 ): StreamUsage | undefined {
-  // do not stream when streaming;
-  if (initialIndex !== undefined) {
-    return;
-  }
-
   // do not stream inner lists of multi-dimensional lists
   if (typeof path.key === 'number') {
     return;
@@ -589,56 +582,60 @@ function maybeAddStream(
     label,
     pathStr: pathToArray(path).join('.'),
     originalLabel,
-    result: undefined as unknown as (index: number) => StreamItemsResult,
-    nextIndex,
+    list: result,
+    nextExecutionIndex: nextIndex,
+    publishedItems: nextIndex,
+    result: undefined as unknown as (
+      index: number,
+    ) => BoxedPromiseOrValue<StreamItemResult>,
+    streamItemQueue: [],
+    pending: false,
   };
 
   stream.result = (index: number) =>
-    executeStreamItems(
-      context,
-      stream,
-      result,
-      itemType,
-      fieldDetailsList.map((details) => ({
-        ...details,
-        deferUsage: undefined,
-      })),
-      path,
-      index,
-      {
-        errors: new Map(),
-        incrementalDataRecords: [],
-        deferUsageSet: undefined,
-      },
+    new BoxedPromiseOrValue(
+      executeStreamItem(
+        context,
+        result,
+        itemType,
+        fieldDetailsList.map((details) => ({
+          ...details,
+          deferUsage: undefined,
+        })),
+        path,
+        index,
+        {
+          errors: new Map(),
+          incrementalDataRecords: [],
+          deferUsageSet: undefined,
+        },
+      ),
     );
 
   incrementalContext.incrementalDataRecords.push(stream);
 }
 
 // eslint-disable-next-line @typescript-eslint/max-params
-function executeStreamItems(
+function executeStreamItem(
   context: TransformationContext,
-  stream: Stream,
   result: ReadonlyArray<unknown>,
   itemType: GraphQLOutputType,
   fieldDetailsList: ReadonlyArray<FieldDetails>,
   path: Path,
   index: number,
   incrementalContext: IncrementalContext,
-): StreamItemsResult {
+): StreamItemResult {
   return {
-    stream,
-    items: completeListValue(
+    item: completeValue(
       context,
       itemType,
       fieldDetailsList,
-      result,
-      path,
+      result[index],
+      addPath(path, index, undefined),
       incrementalContext,
       undefined,
-      index,
     ),
-    errors: incrementalContext.errors,
+    errors: Array.from(incrementalContext.errors.values()),
     incrementalDataRecords: filterIncrementalDataRecords(
       path,
       incrementalContext.errors,

@@ -66,10 +66,12 @@ export interface SubsequentPayloadPublisher<TSubsequentPayload> {
   addFailedStream: (
     stream: Stream,
     errors: ReadonlyArray<GraphQLError>,
+    index: number,
   ) => void;
   addStreamItems: (
     stream: Stream,
     streamItemsResult: StreamItemsResult,
+    index: number,
   ) => void;
   getSubsequentPayload: (hasNext: boolean) => TSubsequentPayload | undefined;
 }
@@ -133,8 +135,8 @@ export function getPayloadPublisher(): PayloadPublisher<
           data,
           path: pathToArray(path),
         };
-        if (errors.size > 0) {
-          incrementalEntry.errors = Array.from(errors.values());
+        if (errors.length > 0) {
+          incrementalEntry.errors = errors;
         }
         if (originalLabel !== undefined) {
           incrementalEntry.label = originalLabel;
@@ -146,12 +148,13 @@ export function getPayloadPublisher(): PayloadPublisher<
     function addFailedStream(
       stream: Stream,
       errors: ReadonlyArray<GraphQLError>,
+      index: number,
     ): void {
       const { path, originalLabel } = stream;
       const incrementalEntry: LegacyIncrementalStreamResult = {
         errors,
         items: null,
-        path: pathToArray(addPath(path, stream.nextIndex, undefined)),
+        path: pathToArray(addPath(path, index, undefined)),
       };
       // TODO: add test case
       /* c8 ignore next 3 */
@@ -164,15 +167,16 @@ export function getPayloadPublisher(): PayloadPublisher<
     function addStreamItems(
       stream: Stream,
       streamItemsResult: StreamItemsResult,
+      index: number,
     ): void {
       const { path, originalLabel } = stream;
       const { items, errors } = streamItemsResult;
       const newIncrementalResult: LegacyIncrementalStreamResult = {
         items,
-        path: pathToArray(addPath(path, stream.nextIndex, undefined)),
+        path: pathToArray(addPath(path, index, undefined)),
       };
-      if (errors.size > 0) {
-        newIncrementalResult.errors = Array.from(errors.values());
+      if (errors.length > 0) {
+        newIncrementalResult.errors = errors;
       }
       if (originalLabel != null) {
         newIncrementalResult.label = originalLabel;
