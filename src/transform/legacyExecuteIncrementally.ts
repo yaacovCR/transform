@@ -8,6 +8,7 @@ import type { PromiseOrValue } from '../jsutils/PromiseOrValue.js';
 
 import { buildTransformationContext } from './buildTransformationContext.js';
 import type { LegacyExperimentalIncrementalExecutionResults } from './PayloadPublisher.js';
+import { getPayloadPublisher } from './PayloadPublisher.js';
 import { transformResult } from './transformResult.js';
 
 export function legacyExecuteIncrementally(
@@ -28,7 +29,11 @@ export function legacyExecuteIncrementally(
     context.transformedArgs,
   );
 
+  const payloadPublisher = getPayloadPublisher();
+
   return isPromise(originalResult)
-    ? originalResult.then((resolved) => transformResult(context, resolved))
-    : transformResult(context, originalResult);
+    ? originalResult.then((resolved) =>
+        transformResult(context, resolved, payloadPublisher),
+      )
+    : transformResult(context, originalResult, payloadPublisher);
 }

@@ -46,12 +46,13 @@ export type LegacyIncrementalResult =
   | LegacyIncrementalDeferResult
   | LegacyIncrementalStreamResult;
 
-export interface PayloadPublisher<TInitialPayload, TSubsequentPayload> {
-  getInitialPayload: (
+export interface PayloadPublisher<TSubsequentPayload, TInitialPayload> {
+  getSubsequentPayloadPublisher: () => SubsequentPayloadPublisher<TSubsequentPayload>;
+  getPayloads: (
     data: ObjMap<unknown>,
     errors: ReadonlyArray<GraphQLError>,
+    subsequentPayloads: AsyncGenerator<TSubsequentPayload, void, void>,
   ) => TInitialPayload;
-  getSubsequentPayloadPublisher: () => SubsequentPayloadPublisher<TSubsequentPayload>;
 }
 
 export interface SubsequentPayloadPublisher<TSubsequentPayload> {
@@ -77,22 +78,13 @@ export interface SubsequentPayloadPublisher<TSubsequentPayload> {
 }
 
 export function getPayloadPublisher(): PayloadPublisher<
-  LegacyInitialIncrementalExecutionResult,
-  LegacySubsequentIncrementalExecutionResult
+  LegacySubsequentIncrementalExecutionResult,
+  LegacyExperimentalIncrementalExecutionResults
 > {
   return {
-    getInitialPayload,
     getSubsequentPayloadPublisher,
+    getPayloads,
   };
-
-  function getInitialPayload(
-    data: ObjMap<unknown>,
-    errors: ReadonlyArray<GraphQLError>,
-  ): LegacyInitialIncrementalExecutionResult {
-    return errors.length === 0
-      ? { data, hasNext: true }
-      : { errors, data, hasNext: true };
-  }
 
   function getSubsequentPayloadPublisher(): SubsequentPayloadPublisher<LegacySubsequentIncrementalExecutionResult> {
     let incremental: Array<LegacyIncrementalResult> = [];
@@ -200,5 +192,23 @@ export function getPayloadPublisher(): PayloadPublisher<
         return subsequentIncrementalExecutionResult;
       }
     }
+  }
+
+  function getPayloads(
+    data: ObjMap<unknown>,
+    errors: ReadonlyArray<GraphQLError>,
+    subsequentResults: AsyncGenerator<
+      LegacySubsequentIncrementalExecutionResult,
+      void,
+      void
+    >,
+  ): LegacyExperimentalIncrementalExecutionResults {
+    return {
+      initialResult:
+        errors.length === 0
+          ? { data, hasNext: true }
+          : { errors, data, hasNext: true },
+      subsequentResults,
+    };
   }
 }

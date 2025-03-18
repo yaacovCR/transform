@@ -12,13 +12,9 @@ import { IncrementalGraph } from './IncrementalGraph.js';
 import type { EncounteredPendingResult } from './MergedResult.js';
 import { MergedResult } from './MergedResult.js';
 import type {
-  LegacyExperimentalIncrementalExecutionResults,
-  LegacyInitialIncrementalExecutionResult,
   LegacySubsequentIncrementalExecutionResult,
-  PayloadPublisher,
   SubsequentPayloadPublisher,
 } from './PayloadPublisher.js';
-import { getPayloadPublisher } from './PayloadPublisher.js';
 import type {
   CompletedIncrementalData,
   DeferredFragment,
@@ -39,45 +35,47 @@ import { isStream } from './types.js';
 export class IncrementalPublisher {
   private _isDone: boolean;
   private _mergedResult: MergedResult;
+  private _subsequentResults:
+    | AsyncGenerator<SubsequentIncrementalExecutionResult>
+    | undefined;
   private _incrementalGraph: IncrementalGraph;
-  private _payloadPublisher: PayloadPublisher<
-    LegacyInitialIncrementalExecutionResult,
-    LegacySubsequentIncrementalExecutionResult
-  >;
   private _subsequentPayloadPublisher: SubsequentPayloadPublisher<LegacySubsequentIncrementalExecutionResult>;
 
-  constructor(originalData: ObjMap<unknown>) {
-    this._isDone = false;
-    this._mergedResult = new MergedResult(originalData);
-    this._payloadPublisher = getPayloadPublisher();
-    this._subsequentPayloadPublisher =
-      this._payloadPublisher.getSubsequentPayloadPublisher();
-    this._incrementalGraph = new IncrementalGraph();
-  }
-
-  buildResponse(
-    initialResult: {
-      data: ObjMap<unknown>;
-      errors: ReadonlyArray<GraphQLError>;
-      incrementalDataRecords: ReadonlyArray<IncrementalDataRecord>;
-    },
+  constructor(
+    originalData: ObjMap<unknown>,
+    incrementalDataRecords: ReadonlyArray<IncrementalDataRecord>,
+    subsequentPayloadPublisher: SubsequentPayloadPublisher<LegacySubsequentIncrementalExecutionResult>,
     pending?: ReadonlyArray<PendingResult>,
     subsequentResults?: AsyncGenerator<SubsequentIncrementalExecutionResult>,
-  ): LegacyExperimentalIncrementalExecutionResults {
+  ) {
+    this._isDone = false;
+    this._mergedResult = new MergedResult(originalData);
     if (pending != null) {
       this._mergedResult.processPending(pending);
     }
+    this._subsequentResults = subsequentResults;
 
-    const { data, errors, incrementalDataRecords } = initialResult;
+    this._subsequentPayloadPublisher = subsequentPayloadPublisher;
+    this._incrementalGraph = new IncrementalGraph();
 
     const newRootNodes = this._incrementalGraph.getNewRootNodes(
       incrementalDataRecords,
     );
     this._handleNewRootNodes(newRootNodes);
+  }
 
+  subscribe(): AsyncGenerator<
+    LegacySubsequentIncrementalExecutionResult,
+    void,
+    void
+  > {
     return {
-      initialResult: this._payloadPublisher.getInitialPayload(data, errors),
-      subsequentResults: this._subscribe(subsequentResults),
+      [Symbol.asyncIterator]() {
+        return this;
+      },
+      next: () => this._next(),
+      return: () => this._return(),
+      throw: (error) => this._throw(error),
     };
   }
 
@@ -97,86 +95,69 @@ export class IncrementalPublisher {
     }
   }
 
-  private _subscribe(
-    subsequentResults:
-      | AsyncGenerator<SubsequentIncrementalExecutionResult>
-      | undefined,
-  ): AsyncGenerator<LegacySubsequentIncrementalExecutionResult, void, void> {
-    const _next = async (): Promise<
-      IteratorResult<LegacySubsequentIncrementalExecutionResult, void>
-    > => {
-      if (this._isDone) {
-        if (subsequentResults) {
-          await this._returnAsyncIteratorsIgnoringErrors(subsequentResults);
+  private async _next(): Promise<
+    IteratorResult<LegacySubsequentIncrementalExecutionResult, void>
+  > {
+    if (this._isDone) {
+      if (this._subsequentResults) {
+        await this._returnAsyncIteratorsIgnoringErrors(this._subsequentResults);
+      }
+      return { value: undefined, done: true };
+    }
+
+    let batch: Iterable<CompletedIncrementalData> | undefined =
+      this._incrementalGraph.currentCompletedBatch();
+    while (true) {
+      const currentBatchResult = this._handleBatch(batch);
+
+      if (currentBatchResult !== undefined) {
+        return currentBatchResult;
+      }
+
+      // TODO: add test cases for async transformation
+      /* c8 ignore next 7 */
+      if (this._incrementalGraph.hasPending()) {
+        // eslint-disable-next-line no-await-in-loop
+        batch = await this._incrementalGraph.nextCompletedBatch();
+        if (batch !== undefined) {
+          continue;
         }
+      }
+
+      invariant(this._subsequentResults != null);
+
+      // eslint-disable-next-line no-await-in-loop
+      const next = await this._subsequentResults.next();
+
+      if (this._isDone) {
         return { value: undefined, done: true };
       }
 
-      let batch: Iterable<CompletedIncrementalData> | undefined =
-        this._incrementalGraph.currentCompletedBatch();
-      while (true) {
-        const currentBatchResult = this._handleBatch(batch);
+      this._onSubsequentIncrementalExecutionResult(next.value);
 
-        if (currentBatchResult !== undefined) {
-          return currentBatchResult;
-        }
+      batch = this._incrementalGraph.currentCompletedBatch();
+    }
+  }
 
-        // TODO: add test cases for async transformation
-        /* c8 ignore next 7 */
-        if (this._incrementalGraph.hasPending()) {
-          // eslint-disable-next-line no-await-in-loop
-          batch = await this._incrementalGraph.nextCompletedBatch();
-          if (batch !== undefined) {
-            continue;
-          }
-        }
+  private async _return(): Promise<
+    IteratorResult<LegacySubsequentIncrementalExecutionResult, void>
+  > {
+    this._isDone = true;
+    if (this._subsequentResults) {
+      await this._returnAsyncIterators(this._subsequentResults);
+    }
+    return { value: undefined, done: true };
+  }
 
-        invariant(subsequentResults != null);
-
-        // eslint-disable-next-line no-await-in-loop
-        const next = await subsequentResults.next();
-
-        if (this._isDone) {
-          return { value: undefined, done: true };
-        }
-
-        this._onSubsequentIncrementalExecutionResult(next.value);
-
-        batch = this._incrementalGraph.currentCompletedBatch();
-      }
-    };
-
-    const _return = async (): Promise<
-      IteratorResult<LegacySubsequentIncrementalExecutionResult, void>
-    > => {
-      this._isDone = true;
-      if (subsequentResults) {
-        await this._returnAsyncIterators(subsequentResults);
-      }
-      return { value: undefined, done: true };
-    };
-
-    const _throw = async (
-      error?: unknown,
-    ): Promise<
-      IteratorResult<LegacySubsequentIncrementalExecutionResult, void>
-    > => {
-      this._isDone = true;
-      if (subsequentResults) {
-        await this._returnAsyncIterators(subsequentResults);
-      }
-      // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
-      return Promise.reject(error);
-    };
-
-    return {
-      [Symbol.asyncIterator]() {
-        return this;
-      },
-      next: _next,
-      return: _return,
-      throw: _throw,
-    };
+  private async _throw(
+    error?: unknown,
+  ): Promise<IteratorResult<LegacySubsequentIncrementalExecutionResult, void>> {
+    this._isDone = true;
+    if (this._subsequentResults) {
+      await this._returnAsyncIterators(this._subsequentResults);
+    }
+    // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
+    return Promise.reject(error);
   }
 
   private _handleBatch(
