@@ -11,10 +11,7 @@ import type { ObjMap } from '../jsutils/ObjMap.js';
 import { IncrementalGraph } from './IncrementalGraph.js';
 import type { EncounteredPendingResult } from './MergedResult.js';
 import { MergedResult } from './MergedResult.js';
-import type {
-  LegacySubsequentIncrementalExecutionResult,
-  SubsequentPayloadPublisher,
-} from './PayloadPublisher.js';
+import type { SubsequentPayloadPublisher } from './PayloadPublisher.js';
 import type {
   CompletedIncrementalData,
   DeferredFragment,
@@ -32,19 +29,19 @@ import { isStream } from './types.js';
  *
  * @internal
  */
-export class IncrementalPublisher {
+export class IncrementalPublisher<TSubsequent> {
   private _isDone: boolean;
   private _mergedResult: MergedResult;
   private _subsequentResults:
     | AsyncGenerator<SubsequentIncrementalExecutionResult>
     | undefined;
   private _incrementalGraph: IncrementalGraph;
-  private _subsequentPayloadPublisher: SubsequentPayloadPublisher<LegacySubsequentIncrementalExecutionResult>;
+  private _subsequentPayloadPublisher: SubsequentPayloadPublisher<TSubsequent>;
 
   constructor(
     originalData: ObjMap<unknown>,
     incrementalDataRecords: ReadonlyArray<IncrementalDataRecord>,
-    subsequentPayloadPublisher: SubsequentPayloadPublisher<LegacySubsequentIncrementalExecutionResult>,
+    subsequentPayloadPublisher: SubsequentPayloadPublisher<TSubsequent>,
     pending?: ReadonlyArray<PendingResult>,
     subsequentResults?: AsyncGenerator<SubsequentIncrementalExecutionResult>,
   ) {
@@ -64,11 +61,7 @@ export class IncrementalPublisher {
     this._handleNewRootNodes(newRootNodes);
   }
 
-  subscribe(): AsyncGenerator<
-    LegacySubsequentIncrementalExecutionResult,
-    void,
-    void
-  > {
+  subscribe(): AsyncGenerator<TSubsequent, void, void> {
     return {
       [Symbol.asyncIterator]() {
         return this;
@@ -95,9 +88,7 @@ export class IncrementalPublisher {
     }
   }
 
-  private async _next(): Promise<
-    IteratorResult<LegacySubsequentIncrementalExecutionResult, void>
-  > {
+  private async _next(): Promise<IteratorResult<TSubsequent, void>> {
     if (this._isDone) {
       if (this._subsequentResults) {
         await this._returnAsyncIteratorsIgnoringErrors(this._subsequentResults);
@@ -139,9 +130,7 @@ export class IncrementalPublisher {
     }
   }
 
-  private async _return(): Promise<
-    IteratorResult<LegacySubsequentIncrementalExecutionResult, void>
-  > {
+  private async _return(): Promise<IteratorResult<TSubsequent, void>> {
     this._isDone = true;
     if (this._subsequentResults) {
       await this._returnAsyncIterators(this._subsequentResults);
@@ -151,7 +140,7 @@ export class IncrementalPublisher {
 
   private async _throw(
     error?: unknown,
-  ): Promise<IteratorResult<LegacySubsequentIncrementalExecutionResult, void>> {
+  ): Promise<IteratorResult<TSubsequent, void>> {
     this._isDone = true;
     if (this._subsequentResults) {
       await this._returnAsyncIterators(this._subsequentResults);
@@ -162,9 +151,7 @@ export class IncrementalPublisher {
 
   private _handleBatch(
     batch: Iterable<CompletedIncrementalData>,
-  ):
-    | IteratorResult<LegacySubsequentIncrementalExecutionResult, void>
-    | undefined {
+  ): IteratorResult<TSubsequent, void> | undefined {
     for (const completedResult of batch) {
       this._handleCompletedIncrementalData(completedResult);
     }
@@ -179,9 +166,6 @@ export class IncrementalPublisher {
       }
 
       return { value: subsequentPayload, done: false };
-    } else if (!hasNext) {
-      this._isDone = true;
-      return { value: { hasNext }, done: false };
     }
   }
 

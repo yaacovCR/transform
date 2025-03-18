@@ -15,11 +15,11 @@ import { invariant } from '../../jsutils/invariant.js';
 import { isPromise } from '../../jsutils/isPromise.js';
 import type { ObjMap } from '../../jsutils/ObjMap.js';
 
-import { legacyExecuteIncrementally } from '../legacyExecuteIncrementally.js';
 import type {
   LegacyInitialIncrementalExecutionResult,
   LegacySubsequentIncrementalExecutionResult,
-} from '../PayloadPublisher.js';
+} from '../legacyExecuteIncrementally.js';
+import { legacyExecuteIncrementally } from '../legacyExecuteIncrementally.js';
 
 const someObjectType = new GraphQLObjectType({
   name: 'SomeObject',

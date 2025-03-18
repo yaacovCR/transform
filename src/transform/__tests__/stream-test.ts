@@ -21,7 +21,7 @@ import { promiseWithResolvers } from '../../jsutils/promiseWithResolvers.js';
 import type {
   LegacyInitialIncrementalExecutionResult,
   LegacySubsequentIncrementalExecutionResult,
-} from '../PayloadPublisher.js';
+} from '../legacyExecuteIncrementally.js';
 
 import { execute } from './execute.js';
 

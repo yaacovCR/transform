@@ -3,8 +3,8 @@ import type { ExecutionArgs, ExecutionResult } from 'graphql';
 import { isPromise } from '../../jsutils/isPromise.js';
 import type { PromiseOrValue } from '../../jsutils/PromiseOrValue.js';
 
+import type { LegacyExperimentalIncrementalExecutionResults } from '../legacyExecuteIncrementally.js';
 import { legacyExecuteIncrementally } from '../legacyExecuteIncrementally.js';
-import type { LegacyExperimentalIncrementalExecutionResults } from '../PayloadPublisher.js';
 
 export function executeSync(args: ExecutionArgs): ExecutionResult {
   const result = legacyExecuteIncrementally(args);
