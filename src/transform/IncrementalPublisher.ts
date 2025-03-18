@@ -8,16 +8,6 @@ import type {
 import { invariant } from '../jsutils/invariant.js';
 import type { ObjMap } from '../jsutils/ObjMap.js';
 
-import type {
-  CompletedIncrementalData,
-  DeferredFragment,
-  ExecutionGroupResult,
-  IncrementalDataRecord,
-  Stream,
-  StreamItems,
-  SubsequentResultRecord,
-} from './buildTransformationContext.js';
-import { isStream } from './buildTransformationContext.js';
 import { IncrementalGraph } from './IncrementalGraph.js';
 import type { EncounteredPendingResult } from './MergedResult.js';
 import { MergedResult } from './MergedResult.js';
@@ -29,6 +19,16 @@ import type {
   SubsequentPayloadPublisher,
 } from './PayloadPublisher.js';
 import { getPayloadPublisher } from './PayloadPublisher.js';
+import type {
+  CompletedIncrementalData,
+  DeferredFragment,
+  ExecutionGroupResult,
+  IncrementalDataRecord,
+  Stream,
+  StreamItems,
+  SubsequentResultRecord,
+} from './types.js';
+import { isStream } from './types.js';
 
 /**
  * This class is used to publish incremental results to the client, enabling semi-concurrent

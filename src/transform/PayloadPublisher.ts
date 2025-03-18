@@ -8,7 +8,7 @@ import type {
   ExecutionGroupResult,
   Stream,
   StreamItemsResult,
-} from './buildTransformationContext.js';
+} from './types.js';
 
 export interface LegacyExperimentalIncrementalExecutionResults {
   initialResult: LegacyInitialIncrementalExecutionResult;

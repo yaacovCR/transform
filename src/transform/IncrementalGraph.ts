@@ -14,8 +14,8 @@ import type {
   StreamItem,
   StreamItems,
   SubsequentResultRecord,
-} from './buildTransformationContext.js';
-import { isStream } from './buildTransformationContext.js';
+} from './types.js';
+import { isStream } from './types.js';
 
 /**
  * @internal

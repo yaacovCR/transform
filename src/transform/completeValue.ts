@@ -36,6 +36,8 @@ import { addPath } from '../jsutils/Path.js';
 
 import type { DeferUsageSet, ExecutionPlan } from './buildExecutionPlan.js';
 import { buildExecutionPlan } from './buildExecutionPlan.js';
+import type { TransformationContext } from './buildTransformationContext.js';
+import { EmbeddedErrors } from './EmbeddedError.js';
 import type {
   DeferredFragment,
   ExecutionGroupResult,
@@ -43,9 +45,7 @@ import type {
   PendingExecutionGroup,
   Stream,
   StreamItemResult,
-  TransformationContext,
-} from './buildTransformationContext.js';
-import { EmbeddedErrors } from './EmbeddedError.js';
+} from './types.js';
 
 interface IncrementalContext {
   errors: Map<Path | undefined, GraphQLError>;
