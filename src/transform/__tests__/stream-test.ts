@@ -1,5 +1,9 @@
 import { assert, expect } from 'chai';
-import type { DocumentNode } from 'graphql';
+import type {
+  DocumentNode,
+  InitialIncrementalExecutionResult,
+  SubsequentIncrementalExecutionResult,
+} from 'graphql';
 import {
   GraphQLID,
   GraphQLList,
@@ -18,11 +22,7 @@ import { resolveOnNextTick } from '../../__testUtils__/resolveOnNextTick.js';
 import type { PromiseOrValue } from '../../jsutils/PromiseOrValue.js';
 import { promiseWithResolvers } from '../../jsutils/promiseWithResolvers.js';
 
-import type {
-  LegacyInitialIncrementalExecutionResult,
-  LegacySubsequentIncrementalExecutionResult,
-} from '../legacyExecuteIncrementally.js';
-import { legacyExecuteIncrementally as execute } from '../legacyExecuteIncrementally.js';
+import { execute } from './execute.js';
 
 const friendType = new GraphQLObjectType({
   fields: {
@@ -98,8 +98,7 @@ async function complete(
 
   if ('initialResult' in result) {
     const results: Array<
-      | LegacyInitialIncrementalExecutionResult
-      | LegacySubsequentIncrementalExecutionResult
+      InitialIncrementalExecutionResult | SubsequentIncrementalExecutionResult
     > = [result.initialResult];
     for await (const patch of result.subsequentResults) {
       results.push(patch);
@@ -127,8 +126,7 @@ async function completeAsync(
   const promises: Array<
     PromiseOrValue<
       IteratorResult<
-        | LegacyInitialIncrementalExecutionResult
-        | LegacySubsequentIncrementalExecutionResult
+        InitialIncrementalExecutionResult | SubsequentIncrementalExecutionResult
       >
     >
   > = [{ done: false, value: result.initialResult }];
@@ -138,7 +136,7 @@ async function completeAsync(
   return Promise.all(promises);
 }
 
-describe('Execute: legacy stream directive', () => {
+describe('Execute: stream directive', () => {
   it('Can stream a list field', async () => {
     const document = parse('{ scalarList @stream(initialCount: 1) }');
     const result = await complete(document, {
@@ -149,12 +147,12 @@ describe('Execute: legacy stream directive', () => {
         data: {
           scalarList: ['apple'],
         },
+        pending: [{ id: '0', path: ['scalarList'] }],
         hasNext: true,
       },
       {
-        incremental: [
-          { items: ['banana', 'coconut'], path: ['scalarList', 1] },
-        ],
+        incremental: [{ items: ['banana', 'coconut'], id: '0' }],
+        completed: [{ id: '0' }],
         hasNext: false,
       },
     ]);
@@ -169,12 +167,12 @@ describe('Execute: legacy stream directive', () => {
         data: {
           scalarList: [],
         },
+        pending: [{ id: '0', path: ['scalarList'] }],
         hasNext: true,
       },
       {
-        incremental: [
-          { items: ['apple', 'banana', 'coconut'], path: ['scalarList', 0] },
-        ],
+        incremental: [{ items: ['apple', 'banana', 'coconut'], id: '0' }],
+        completed: [{ id: '0' }],
         hasNext: false,
       },
     ]);
@@ -214,16 +212,17 @@ describe('Execute: legacy stream directive', () => {
         data: {
           scalarList: ['apple'],
         },
+        pending: [{ id: '0', path: ['scalarList'], label: 'scalar-stream' }],
         hasNext: true,
       },
       {
         incremental: [
           {
             items: ['banana', 'coconut'],
-            path: ['scalarList', 1],
-            label: 'scalar-stream',
+            id: '0',
           },
         ],
+        completed: [{ id: '0' }],
         hasNext: false,
       },
     ]);
@@ -249,10 +248,12 @@ describe('Execute: legacy stream directive', () => {
     expectJSON(result).toDeepEqual([
       {
         data: { scalarList: ['apple', 'banana'] },
+        pending: [{ id: '0', path: ['scalarList'] }],
         hasNext: true,
       },
       {
-        incremental: [{ items: ['coconut'], path: ['scalarList', 2] }],
+        incremental: [{ items: ['coconut'], id: '0' }],
+        completed: [{ id: '0' }],
         hasNext: false,
       },
     ]);
@@ -271,6 +272,7 @@ describe('Execute: legacy stream directive', () => {
         data: {
           scalarListList: [['apple', 'apple', 'apple']],
         },
+        pending: [{ id: '0', path: ['scalarListList'] }],
         hasNext: true,
       },
       {
@@ -280,9 +282,10 @@ describe('Execute: legacy stream directive', () => {
               ['banana', 'banana', 'banana'],
               ['coconut', 'coconut', 'coconut'],
             ],
-            path: ['scalarListList', 1],
+            id: '0',
           },
         ],
+        completed: [{ id: '0' }],
         hasNext: false,
       },
     ]);
@@ -313,6 +316,7 @@ describe('Execute: legacy stream directive', () => {
             },
           ],
         },
+        pending: [{ id: '0', path: ['friendList'] }],
         hasNext: true,
       },
       {
@@ -324,9 +328,10 @@ describe('Execute: legacy stream directive', () => {
                 id: '3',
               },
             ],
-            path: ['friendList', 2],
+            id: '0',
           },
         ],
+        completed: [{ id: '0' }],
         hasNext: false,
       },
     ]);
@@ -348,13 +353,14 @@ describe('Execute: legacy stream directive', () => {
         data: {
           friendList: [],
         },
+        pending: [{ id: '0', path: ['friendList'] }],
         hasNext: true,
       },
       {
         incremental: [
           {
             items: [{ name: 'Luke', id: '1' }],
-            path: ['friendList', 0],
+            id: '0',
           },
         ],
         hasNext: true,
@@ -363,7 +369,7 @@ describe('Execute: legacy stream directive', () => {
         incremental: [
           {
             items: [{ name: 'Han', id: '2' }],
-            path: ['friendList', 1],
+            id: '0',
           },
         ],
         hasNext: true,
@@ -372,9 +378,10 @@ describe('Execute: legacy stream directive', () => {
         incremental: [
           {
             items: [{ name: 'Leia', id: '3' }],
-            path: ['friendList', 2],
+            id: '0',
           },
         ],
+        completed: [{ id: '0' }],
         hasNext: false,
       },
     ]);
@@ -407,13 +414,14 @@ describe('Execute: legacy stream directive', () => {
         data: {
           friendList: [],
         },
+        pending: [{ id: '0', path: ['friendList'] }],
         hasNext: true,
       },
       {
         incremental: [
           {
             items: [{ id: '1' }],
-            path: ['friendList', 0],
+            id: '0',
           },
         ],
         hasNext: true,
@@ -422,7 +430,7 @@ describe('Execute: legacy stream directive', () => {
         incremental: [
           {
             items: [{ id: '2' }],
-            path: ['friendList', 1],
+            id: '0',
           },
         ],
         hasNext: true,
@@ -431,9 +439,10 @@ describe('Execute: legacy stream directive', () => {
         incremental: [
           {
             items: [{ id: '3' }],
-            path: ['friendList', 2],
+            id: '0',
           },
         ],
+        completed: [{ id: '0' }],
         hasNext: false,
       },
     ]);
@@ -471,15 +480,17 @@ describe('Execute: legacy stream directive', () => {
         data: {
           friendList: [],
         },
+        pending: [{ id: '0', path: ['friendList'] }],
         hasNext: true,
       },
       {
         incremental: [
           {
             items: [{ id: '1' }, { id: '2' }, { id: '3' }],
-            path: ['friendList', 0],
+            id: '0',
           },
         ],
+        completed: [{ id: '0' }],
         hasNext: false,
       },
     ]);
@@ -515,6 +526,7 @@ describe('Execute: legacy stream directive', () => {
             },
           ],
         },
+        pending: [{ id: '0', path: ['friendList'] }],
         hasNext: true,
       },
       {
@@ -526,9 +538,10 @@ describe('Execute: legacy stream directive', () => {
                 id: '3',
               },
             ],
-            path: ['friendList', 2],
+            id: '0',
           },
         ],
+        completed: [{ id: '0' }],
         hasNext: false,
       },
     ]);
@@ -563,15 +576,17 @@ describe('Execute: legacy stream directive', () => {
         data: {
           friendList: [{ name: 'Luke', id: '1' }, null],
         },
+        pending: [{ id: '0', path: ['friendList'] }],
         hasNext: true,
       },
       {
         incremental: [
           {
             items: [{ name: 'Leia', id: '3' }],
-            path: ['friendList', 2],
+            id: '0',
           },
         ],
+        completed: [{ id: '0' }],
         hasNext: false,
       },
     ]);
@@ -599,12 +614,14 @@ describe('Execute: legacy stream directive', () => {
         data: {
           friendList: [{ name: 'Luke', id: '1' }],
         },
+        pending: [{ id: '0', path: ['friendList'] }],
         hasNext: true,
       },
       {
         incremental: [
           {
             items: [null],
+            id: '0',
             errors: [
               {
                 message: 'bad',
@@ -612,7 +629,6 @@ describe('Execute: legacy stream directive', () => {
                 path: ['friendList', 1],
               },
             ],
-            path: ['friendList', 1],
           },
         ],
         hasNext: true,
@@ -621,9 +637,10 @@ describe('Execute: legacy stream directive', () => {
         incremental: [
           {
             items: [{ name: 'Leia', id: '3' }],
-            path: ['friendList', 2],
+            id: '0',
           },
         ],
+        completed: [{ id: '0' }],
         hasNext: false,
       },
     ]);
@@ -649,13 +666,14 @@ describe('Execute: legacy stream directive', () => {
         data: {
           friendList: [],
         },
+        pending: [{ id: '0', path: ['friendList'] }],
         hasNext: true,
       },
       {
         incremental: [
           {
             items: [{ name: 'Luke', id: '1' }],
-            path: ['friendList', 0],
+            id: '0',
           },
         ],
         hasNext: true,
@@ -664,7 +682,7 @@ describe('Execute: legacy stream directive', () => {
         incremental: [
           {
             items: [{ name: 'Han', id: '2' }],
-            path: ['friendList', 1],
+            id: '0',
           },
         ],
         hasNext: true,
@@ -673,12 +691,13 @@ describe('Execute: legacy stream directive', () => {
         incremental: [
           {
             items: [{ name: 'Leia', id: '3' }],
-            path: ['friendList', 2],
+            id: '0',
           },
         ],
         hasNext: true,
       },
       {
+        completed: [{ id: '0' }],
         hasNext: false,
       },
     ]);
@@ -707,18 +726,20 @@ describe('Execute: legacy stream directive', () => {
             { name: 'Han', id: '2' },
           ],
         },
+        pending: [{ id: '0', path: ['friendList'] }],
         hasNext: true,
       },
       {
         incremental: [
           {
             items: [{ name: 'Leia', id: '3' }],
-            path: ['friendList', 2],
+            id: '0',
           },
         ],
         hasNext: true,
       },
       {
+        completed: [{ id: '0' }],
         hasNext: false,
       },
     ]);
@@ -782,13 +803,14 @@ describe('Execute: legacy stream directive', () => {
         data: {
           friendList: [],
         },
+        pending: [{ id: '0', path: ['friendList'] }],
         hasNext: true,
       },
       {
         incremental: [
           {
             items: [{ id: '1' }],
-            path: ['friendList', 0],
+            id: '0',
           },
         ],
         hasNext: true,
@@ -797,7 +819,7 @@ describe('Execute: legacy stream directive', () => {
         incremental: [
           {
             items: [{ id: '2' }],
-            path: ['friendList', 1],
+            id: '0',
           },
         ],
         hasNext: true,
@@ -806,12 +828,13 @@ describe('Execute: legacy stream directive', () => {
         incremental: [
           {
             items: [{ id: '3' }],
-            path: ['friendList', 2],
+            id: '0',
           },
         ],
         hasNext: true,
       },
       {
+        completed: [{ id: '0' }],
         hasNext: false,
       },
     ]);
@@ -853,15 +876,17 @@ describe('Execute: legacy stream directive', () => {
         data: {
           friendList: [],
         },
+        pending: [{ id: '0', path: ['friendList'] }],
         hasNext: true,
       },
       {
         incremental: [
           {
             items: [{ id: '1' }, { id: '2' }, { id: '3' }],
-            path: ['friendList', 0],
+            id: '0',
           },
         ],
+        completed: [{ id: '0' }],
         hasNext: false,
       },
     ]);
@@ -893,6 +918,7 @@ describe('Execute: legacy stream directive', () => {
               { name: 'Han', id: '2' },
             ],
           },
+          pending: [{ id: '0', path: ['friendList'] }],
           hasNext: true,
         },
       },
@@ -902,7 +928,7 @@ describe('Execute: legacy stream directive', () => {
           incremental: [
             {
               items: [{ name: 'Leia', id: '3' }],
-              path: ['friendList', 2],
+              id: '0',
             },
           ],
           hasNext: true,
@@ -911,6 +937,7 @@ describe('Execute: legacy stream directive', () => {
       {
         done: false,
         value: {
+          completed: [{ id: '0' }],
           hasNext: false,
         },
       },
@@ -965,12 +992,13 @@ describe('Execute: legacy stream directive', () => {
         data: {
           friendList: [{ name: 'Luke', id: '1' }],
         },
+        pending: [{ id: '0', path: ['friendList'] }],
         hasNext: true,
       },
       {
-        incremental: [
+        completed: [
           {
-            items: null,
+            id: '0',
             errors: [
               {
                 message: 'bad',
@@ -978,7 +1006,6 @@ describe('Execute: legacy stream directive', () => {
                 path: ['friendList'],
               },
             ],
-            path: ['friendList', 1],
           },
         ],
         hasNext: false,
@@ -1002,12 +1029,13 @@ describe('Execute: legacy stream directive', () => {
         data: {
           nonNullFriendList: [{ name: 'Luke' }],
         },
+        pending: [{ id: '0', path: ['nonNullFriendList'] }],
         hasNext: true,
       },
       {
-        incremental: [
+        completed: [
           {
-            items: null,
+            id: '0',
             errors: [
               {
                 message:
@@ -1016,7 +1044,6 @@ describe('Execute: legacy stream directive', () => {
                 path: ['nonNullFriendList', 1],
               },
             ],
-            path: ['nonNullFriendList', 1],
           },
         ],
         hasNext: false,
@@ -1049,12 +1076,13 @@ describe('Execute: legacy stream directive', () => {
         data: {
           nonNullFriendList: [{ name: 'Luke' }],
         },
+        pending: [{ id: '0', path: ['nonNullFriendList'] }],
         hasNext: true,
       },
       {
-        incremental: [
+        completed: [
           {
-            items: null,
+            id: '0',
             errors: [
               {
                 message:
@@ -1063,7 +1091,6 @@ describe('Execute: legacy stream directive', () => {
                 path: ['nonNullFriendList', 1],
               },
             ],
-            path: ['nonNullFriendList', 1],
           },
         ],
         hasNext: false,
@@ -1084,12 +1111,14 @@ describe('Execute: legacy stream directive', () => {
         data: {
           scalarList: ['Luke'],
         },
+        pending: [{ id: '0', path: ['scalarList'] }],
         hasNext: true,
       },
       {
         incremental: [
           {
             items: [null],
+            id: '0',
             errors: [
               {
                 message: 'String cannot represent value: {}',
@@ -1097,9 +1126,9 @@ describe('Execute: legacy stream directive', () => {
                 path: ['scalarList', 1],
               },
             ],
-            path: ['scalarList', 1],
           },
         ],
+        completed: [{ id: '0' }],
         hasNext: false,
       },
     ]);
@@ -1126,12 +1155,14 @@ describe('Execute: legacy stream directive', () => {
         data: {
           friendList: [{ nonNullName: 'Luke' }],
         },
+        pending: [{ id: '0', path: ['friendList'] }],
         hasNext: true,
       },
       {
         incremental: [
           {
             items: [null],
+            id: '0',
             errors: [
               {
                 message: 'Oops',
@@ -1139,7 +1170,6 @@ describe('Execute: legacy stream directive', () => {
                 path: ['friendList', 1, 'nonNullName'],
               },
             ],
-            path: ['friendList', 1],
           },
         ],
         hasNext: true,
@@ -1148,9 +1178,10 @@ describe('Execute: legacy stream directive', () => {
         incremental: [
           {
             items: [{ nonNullName: 'Han' }],
-            path: ['friendList', 2],
+            id: '0',
           },
         ],
+        completed: [{ id: '0' }],
         hasNext: false,
       },
     ]);
@@ -1175,12 +1206,14 @@ describe('Execute: legacy stream directive', () => {
         data: {
           friendList: [{ nonNullName: 'Luke' }],
         },
+        pending: [{ id: '0', path: ['friendList'] }],
         hasNext: true,
       },
       {
         incremental: [
           {
             items: [null],
+            id: '0',
             errors: [
               {
                 message: 'Oops',
@@ -1188,7 +1221,6 @@ describe('Execute: legacy stream directive', () => {
                 path: ['friendList', 1, 'nonNullName'],
               },
             ],
-            path: ['friendList', 1],
           },
         ],
         hasNext: true,
@@ -1197,9 +1229,10 @@ describe('Execute: legacy stream directive', () => {
         incremental: [
           {
             items: [{ nonNullName: 'Han' }],
-            path: ['friendList', 2],
+            id: '0',
           },
         ],
+        completed: [{ id: '0' }],
         hasNext: false,
       },
     ]);
@@ -1226,12 +1259,13 @@ describe('Execute: legacy stream directive', () => {
         data: {
           nonNullFriendList: [{ nonNullName: 'Luke' }],
         },
+        pending: [{ id: '0', path: ['nonNullFriendList'] }],
         hasNext: true,
       },
       {
-        incremental: [
+        completed: [
           {
-            items: null,
+            id: '0',
             errors: [
               {
                 message: 'Oops',
@@ -1239,7 +1273,6 @@ describe('Execute: legacy stream directive', () => {
                 path: ['nonNullFriendList', 1, 'nonNullName'],
               },
             ],
-            path: ['nonNullFriendList', 1],
           },
         ],
         hasNext: false,
@@ -1266,12 +1299,13 @@ describe('Execute: legacy stream directive', () => {
         data: {
           nonNullFriendList: [{ nonNullName: 'Luke' }],
         },
+        pending: [{ id: '0', path: ['nonNullFriendList'] }],
         hasNext: true,
       },
       {
-        incremental: [
+        completed: [
           {
-            items: null,
+            id: '0',
             errors: [
               {
                 message: 'Oops',
@@ -1279,7 +1313,6 @@ describe('Execute: legacy stream directive', () => {
                 path: ['nonNullFriendList', 1, 'nonNullName'],
               },
             ],
-            path: ['nonNullFriendList', 1],
           },
         ],
         hasNext: false,
@@ -1308,12 +1341,14 @@ describe('Execute: legacy stream directive', () => {
         data: {
           friendList: [{ nonNullName: 'Luke' }],
         },
+        pending: [{ id: '0', path: ['friendList'] }],
         hasNext: true,
       },
       {
         incremental: [
           {
             items: [null],
+            id: '0',
             errors: [
               {
                 message: 'Oops',
@@ -1321,7 +1356,6 @@ describe('Execute: legacy stream directive', () => {
                 path: ['friendList', 1, 'nonNullName'],
               },
             ],
-            path: ['friendList', 1],
           },
         ],
         hasNext: true,
@@ -1330,12 +1364,13 @@ describe('Execute: legacy stream directive', () => {
         incremental: [
           {
             items: [{ nonNullName: 'Han' }],
-            path: ['friendList', 2],
+            id: '0',
           },
         ],
         hasNext: true,
       },
       {
+        completed: [{ id: '0' }],
         hasNext: false,
       },
     ]);
@@ -1361,12 +1396,13 @@ describe('Execute: legacy stream directive', () => {
         data: {
           nonNullFriendList: [{ nonNullName: 'Luke' }],
         },
+        pending: [{ id: '0', path: ['nonNullFriendList'] }],
         hasNext: true,
       },
       {
-        incremental: [
+        completed: [
           {
-            items: null,
+            id: '0',
             errors: [
               {
                 message: 'Oops',
@@ -1374,7 +1410,6 @@ describe('Execute: legacy stream directive', () => {
                 path: ['nonNullFriendList', 1, 'nonNullName'],
               },
             ],
-            path: ['nonNullFriendList', 1],
           },
         ],
         hasNext: false,
@@ -1424,12 +1459,13 @@ describe('Execute: legacy stream directive', () => {
         data: {
           nonNullFriendList: [{ nonNullName: 'Luke' }],
         },
+        pending: [{ id: '0', path: ['nonNullFriendList'] }],
         hasNext: true,
       },
       {
-        incremental: [
+        completed: [
           {
-            items: null,
+            id: '0',
             errors: [
               {
                 message: 'Oops',
@@ -1437,7 +1473,6 @@ describe('Execute: legacy stream directive', () => {
                 path: ['nonNullFriendList', 1, 'nonNullName'],
               },
             ],
-            path: ['nonNullFriendList', 1],
           },
         ],
         hasNext: false,
@@ -1497,12 +1532,13 @@ describe('Execute: legacy stream directive', () => {
         data: {
           nonNullFriendList: [{ nonNullName: 'Luke' }],
         },
+        pending: [{ id: '0', path: ['nonNullFriendList'] }],
         hasNext: true,
       },
       {
-        incremental: [
+        completed: [
           {
-            items: null,
+            id: '0',
             errors: [
               {
                 message: 'Oops',
@@ -1510,7 +1546,6 @@ describe('Execute: legacy stream directive', () => {
                 path: ['nonNullFriendList', 1, 'nonNullName'],
               },
             ],
-            path: ['nonNullFriendList', 1],
           },
         ],
         hasNext: false,
@@ -1613,16 +1648,21 @@ describe('Execute: legacy stream directive', () => {
           otherNestedObject: {},
           nestedObject: { nestedFriendList: [] },
         },
+        pending: [
+          { id: '0', path: ['otherNestedObject'] },
+          { id: '1', path: ['nestedObject', 'nestedFriendList'] },
+        ],
         hasNext: true,
       },
       {
         incremental: [
           {
             items: [{ name: 'Luke' }],
-            path: ['nestedObject', 'nestedFriendList', 0],
+            id: '1',
           },
           {
             data: { scalarField: null },
+            id: '0',
             errors: [
               {
                 message: 'Oops',
@@ -1630,12 +1670,13 @@ describe('Execute: legacy stream directive', () => {
                 path: ['otherNestedObject', 'scalarField'],
               },
             ],
-            path: ['otherNestedObject'],
           },
         ],
+        completed: [{ id: '0' }],
         hasNext: true,
       },
       {
+        completed: [{ id: '1' }],
         hasNext: false,
       },
     ]);
@@ -1670,6 +1711,7 @@ describe('Execute: legacy stream directive', () => {
         data: {
           nestedObject: {},
         },
+        pending: [{ id: '0', path: ['nestedObject'] }],
         hasNext: true,
       },
       {
@@ -1678,6 +1720,7 @@ describe('Execute: legacy stream directive', () => {
             data: {
               deeperNestedObject: null,
             },
+            id: '0',
             errors: [
               {
                 message:
@@ -1690,9 +1733,9 @@ describe('Execute: legacy stream directive', () => {
                 ],
               },
             ],
-            path: ['nestedObject'],
           },
         ],
+        completed: [{ id: '0' }],
         hasNext: false,
       },
     ]);
@@ -1721,12 +1764,14 @@ describe('Execute: legacy stream directive', () => {
         data: {
           friendList: [],
         },
+        pending: [{ id: '0', path: ['friendList'] }],
         hasNext: true,
       },
       {
         incremental: [
           {
             items: [null],
+            id: '0',
             errors: [
               {
                 message:
@@ -1735,12 +1780,12 @@ describe('Execute: legacy stream directive', () => {
                 path: ['friendList', 0, 'nonNullName'],
               },
             ],
-            path: ['friendList', 0],
           },
         ],
         hasNext: true,
       },
       {
+        completed: [{ id: '0' }],
         hasNext: false,
       },
     ]);
@@ -1811,6 +1856,7 @@ describe('Execute: legacy stream directive', () => {
       data: {
         nestedObject: {},
       },
+      pending: [{ id: '0', path: ['nestedObject'] }],
       hasNext: true,
     });
 
@@ -1823,6 +1869,7 @@ describe('Execute: legacy stream directive', () => {
             data: {
               deeperNestedObject: null,
             },
+            id: '0',
             errors: [
               {
                 message:
@@ -1835,9 +1882,9 @@ describe('Execute: legacy stream directive', () => {
                 ],
               },
             ],
-            path: ['nestedObject'],
           },
         ],
+        completed: [{ id: '0' }],
         hasNext: false,
       },
     });
@@ -1871,13 +1918,14 @@ describe('Execute: legacy stream directive', () => {
         data: {
           friendList: [{ id: '1', name: 'Luke' }],
         },
+        pending: [{ id: '0', path: ['friendList'] }],
         hasNext: true,
       },
       {
         incremental: [
           {
             items: [{ id: '2', name: 'Han' }],
-            path: ['friendList', 1],
+            id: '0',
           },
         ],
         hasNext: true,
@@ -1886,12 +1934,13 @@ describe('Execute: legacy stream directive', () => {
         incremental: [
           {
             items: [{ id: '3', name: 'Leia' }],
-            path: ['friendList', 2],
+            id: '0',
           },
         ],
         hasNext: true,
       },
       {
+        completed: [{ id: '0' }],
         hasNext: false,
       },
     ]);
@@ -1929,182 +1978,29 @@ describe('Execute: legacy stream directive', () => {
             nestedFriendList: [],
           },
         },
+        pending: [{ id: '0', path: ['nestedObject', 'nestedFriendList'] }],
         hasNext: true,
       },
       {
         incremental: [
-          {
-            data: { nestedFriendList: [] },
-            path: ['nestedObject'],
-          },
-        ],
-        hasNext: true,
-      },
-      {
-        incremental: [
-          {
-            items: [{ id: '1' }],
-            path: ['nestedObject', 'nestedFriendList', 0],
-          },
           {
             items: [{ id: '1', name: 'Luke' }],
-            path: ['nestedObject', 'nestedFriendList', 0],
+            id: '0',
           },
         ],
         hasNext: true,
       },
       {
         incremental: [
-          {
-            items: [{ id: '2' }],
-            path: ['nestedObject', 'nestedFriendList', 1],
-          },
           {
             items: [{ id: '2', name: 'Han' }],
-            path: ['nestedObject', 'nestedFriendList', 1],
+            id: '0',
           },
         ],
         hasNext: true,
       },
       {
-        hasNext: false,
-      },
-    ]);
-  });
-  it('Handles overlapping deferred and non-deferred streams with a non-zero initial count', async () => {
-    const document = parse(`
-      query {
-        nestedObject {
-          nestedFriendList @stream(initialCount: 1) {
-            id
-          }
-        }
-        nestedObject {
-          ... @defer {
-            nestedFriendList @stream(initialCount: 1) {
-              id
-              name
-            }
-          }
-        }
-      }
-    `);
-    const result = await complete(document, {
-      nestedObject: {
-        async *nestedFriendList() {
-          yield await Promise.resolve(friends[0]);
-          yield await Promise.resolve(friends[1]);
-        },
-      },
-    });
-    expectJSON(result).toDeepEqual([
-      {
-        data: {
-          nestedObject: {
-            nestedFriendList: [{ id: '1' }],
-          },
-        },
-        hasNext: true,
-      },
-      {
-        incremental: [
-          {
-            data: { nestedFriendList: [{ id: '1', name: 'Luke' }] },
-            path: ['nestedObject'],
-          },
-        ],
-        hasNext: true,
-      },
-      {
-        incremental: [
-          {
-            items: [{ id: '2' }],
-            path: ['nestedObject', 'nestedFriendList', 1],
-          },
-          {
-            items: [{ id: '2', name: 'Han' }],
-            path: ['nestedObject', 'nestedFriendList', 1],
-          },
-        ],
-        hasNext: true,
-      },
-      {
-        hasNext: false,
-      },
-    ]);
-  });
-  it('Handles overlapping deferred and non-deferred streams with a non-zero initial count with a slow defer', async () => {
-    const document = parse(`
-      query {
-        nestedObject {
-          nestedFriendList @stream(initialCount: 1) {
-            id
-          }
-        }
-        nestedObject {
-          ... @defer {
-            nestedFriendList @stream(initialCount: 1) {
-              id
-              name
-            }
-          }
-        }
-      }
-    `);
-    const result = await complete(document, {
-      nestedObject: {
-        async *nestedFriendList() {
-          yield await Promise.resolve({
-            ...friends[0],
-            name: Promise.resolve(friends[0].name),
-          });
-          yield await Promise.resolve(friends[1]);
-          yield await Promise.resolve(friends[2]);
-        },
-      },
-    });
-    expectJSON(result).toDeepEqual([
-      {
-        data: {
-          nestedObject: {
-            nestedFriendList: [{ id: '1' }],
-          },
-        },
-        hasNext: true,
-      },
-      {
-        incremental: [
-          {
-            items: [{ id: '2' }],
-            path: ['nestedObject', 'nestedFriendList', 1],
-          },
-          {
-            data: {
-              nestedFriendList: [{ id: '1', name: 'Luke' }],
-            },
-            path: ['nestedObject'],
-          },
-          {
-            items: [{ id: '2', name: 'Han' }],
-            path: ['nestedObject', 'nestedFriendList', 1],
-          },
-        ],
-        hasNext: true,
-      },
-      {
-        incremental: [
-          {
-            items: [{ id: '3' }],
-            path: ['nestedObject', 'nestedFriendList', 2],
-          },
-          {
-            items: [{ id: '3', name: 'Leia' }],
-            path: ['nestedObject', 'nestedFriendList', 2],
-          },
-        ],
-        hasNext: true,
-      },
-      {
+        completed: [{ id: '0' }],
         hasNext: false,
       },
     ]);
@@ -2146,6 +2042,7 @@ describe('Execute: legacy stream directive', () => {
       data: {
         nestedObject: {},
       },
+      pending: [{ id: '0', path: ['nestedObject'] }],
       hasNext: true,
     });
 
@@ -2154,12 +2051,14 @@ describe('Execute: legacy stream directive', () => {
     const result2 = await result2Promise;
     expectJSON(result2).toDeepEqual({
       value: {
+        pending: [{ id: '1', path: ['nestedObject', 'nestedFriendList'] }],
         incremental: [
           {
             data: { scalarField: 'slow', nestedFriendList: [] },
-            path: ['nestedObject'],
+            id: '0',
           },
         ],
+        completed: [{ id: '0' }],
         hasNext: true,
       },
       done: false,
@@ -2171,7 +2070,7 @@ describe('Execute: legacy stream directive', () => {
         incremental: [
           {
             items: [{ name: 'Luke' }],
-            path: ['nestedObject', 'nestedFriendList', 0],
+            id: '1',
           },
         ],
         hasNext: true,
@@ -2185,7 +2084,7 @@ describe('Execute: legacy stream directive', () => {
         incremental: [
           {
             items: [{ name: 'Han' }],
-            path: ['nestedObject', 'nestedFriendList', 1],
+            id: '1',
           },
         ],
         hasNext: true,
@@ -2196,6 +2095,7 @@ describe('Execute: legacy stream directive', () => {
     const result5 = await iterator.next();
     expectJSON(result5).toDeepEqual({
       value: {
+        completed: [{ id: '1' }],
         hasNext: false,
       },
       done: false,
@@ -2248,6 +2148,7 @@ describe('Execute: legacy stream directive', () => {
       data: {
         friendList: [],
       },
+      pending: [{ id: '0', path: ['friendList'], label: 'stream-label' }],
       hasNext: true,
     });
 
@@ -2256,18 +2157,18 @@ describe('Execute: legacy stream directive', () => {
     const result2 = await result2Promise;
     expectJSON(result2).toDeepEqual({
       value: {
+        pending: [{ id: '1', path: ['friendList', 0], label: 'DeferName' }],
         incremental: [
           {
             items: [{ id: '1' }],
-            path: ['friendList', 0],
-            label: 'stream-label',
+            id: '0',
           },
           {
             data: { name: 'Luke' },
-            path: ['friendList', 0],
-            label: 'DeferName',
+            id: '1',
           },
         ],
+        completed: [{ id: '1' }],
         hasNext: true,
       },
       done: false,
@@ -2278,11 +2179,11 @@ describe('Execute: legacy stream directive', () => {
     const result3 = await result3Promise;
     expectJSON(result3).toDeepEqual({
       value: {
+        pending: [{ id: '2', path: ['friendList', 1], label: 'DeferName' }],
         incremental: [
           {
             items: [{ id: '2' }],
-            path: ['friendList', 1],
-            label: 'stream-label',
+            id: '0',
           },
         ],
         hasNext: true,
@@ -2292,19 +2193,27 @@ describe('Execute: legacy stream directive', () => {
     const result4 = await iterator.next();
     expectJSON(result4).toDeepEqual({
       value: {
-        incremental: [
-          {
-            data: { name: 'Han' },
-            path: ['friendList', 1],
-            label: 'DeferName',
-          },
-        ],
-        hasNext: false,
+        completed: [{ id: '0' }],
+        hasNext: true,
       },
       done: false,
     });
     const result5 = await iterator.next();
     expectJSON(result5).toDeepEqual({
+      value: {
+        incremental: [
+          {
+            data: { name: 'Han' },
+            id: '2',
+          },
+        ],
+        completed: [{ id: '2' }],
+        hasNext: false,
+      },
+      done: false,
+    });
+    const result6 = await iterator.next();
+    expectJSON(result6).toDeepEqual({
       value: undefined,
       done: true,
     });
@@ -2351,6 +2260,10 @@ describe('Execute: legacy stream directive', () => {
       data: {
         friendList: [{ id: '1' }],
       },
+      pending: [
+        { id: '0', path: ['friendList', 0], label: 'DeferName' },
+        { id: '1', path: ['friendList'], label: 'stream-label' },
+      ],
       hasNext: true,
     });
 
@@ -2362,10 +2275,10 @@ describe('Execute: legacy stream directive', () => {
         incremental: [
           {
             data: { name: 'Luke' },
-            path: ['friendList', 0],
-            label: 'DeferName',
+            id: '0',
           },
         ],
+        completed: [{ id: '0' }],
         hasNext: true,
       },
       done: false,
@@ -2374,11 +2287,11 @@ describe('Execute: legacy stream directive', () => {
     const result3 = await iterator.next();
     expectJSON(result3).toDeepEqual({
       value: {
+        pending: [{ id: '2', path: ['friendList', 1], label: 'DeferName' }],
         incremental: [
           {
             items: [{ id: '2' }],
-            path: ['friendList', 1],
-            label: 'stream-label',
+            id: '1',
           },
         ],
         hasNext: true,
@@ -2392,10 +2305,10 @@ describe('Execute: legacy stream directive', () => {
         incremental: [
           {
             data: { name: 'Han' },
-            path: ['friendList', 1],
-            label: 'DeferName',
+            id: '2',
           },
         ],
+        completed: [{ id: '2' }],
         hasNext: true,
       },
       done: false,
@@ -2406,6 +2319,7 @@ describe('Execute: legacy stream directive', () => {
     const result5 = await result5Promise;
     expectJSON(result5).toDeepEqual({
       value: {
+        completed: [{ id: '1' }],
         hasNext: false,
       },
       done: false,
@@ -2454,6 +2368,7 @@ describe('Execute: legacy stream directive', () => {
       data: {
         friendList: [],
       },
+      pending: [{ id: '0', path: ['friendList'] }],
       hasNext: true,
     });
 
@@ -2511,6 +2426,7 @@ describe('Execute: legacy stream directive', () => {
           },
         ],
       },
+      pending: [{ id: '0', path: ['friendList'] }],
       hasNext: true,
     });
 
@@ -2570,6 +2486,10 @@ describe('Execute: legacy stream directive', () => {
           },
         ],
       },
+      pending: [
+        { id: '0', path: ['friendList', 0] },
+        { id: '1', path: ['friendList'] },
+      ],
       hasNext: true,
     });
 
