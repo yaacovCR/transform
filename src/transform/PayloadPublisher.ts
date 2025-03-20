@@ -7,6 +7,7 @@ import type {
   ExecutionGroupResult,
   Stream,
   StreamItemsResult,
+  SubsequentResultRecord,
 } from './types.js';
 
 export interface PayloadPublisher<TSubsequentPayload, TInitialPayload> {
@@ -14,6 +15,7 @@ export interface PayloadPublisher<TSubsequentPayload, TInitialPayload> {
   getPayloads: (
     data: ObjMap<unknown>,
     errors: ReadonlyArray<GraphQLError>,
+    newRootNodes: ReadonlyArray<SubsequentResultRecord>,
     subsequentPayloads: AsyncGenerator<TSubsequentPayload, void, void>,
   ) => TInitialPayload;
 }
@@ -25,6 +27,7 @@ export interface SubsequentPayloadPublisher<TSubsequentPayload> {
   ) => void;
   addSuccessfulDeferredFragment: (
     deferredFragment: DeferredFragment,
+    newRootNodes: ReadonlyArray<SubsequentResultRecord>,
     executionGroupResults: ReadonlyArray<ExecutionGroupResult>,
   ) => void;
   addFailedStream: (
@@ -32,8 +35,10 @@ export interface SubsequentPayloadPublisher<TSubsequentPayload> {
     errors: ReadonlyArray<GraphQLError>,
     index: number,
   ) => void;
+  addSuccessfulStream: (stream: Stream) => void;
   addStreamItems: (
     stream: Stream,
+    newRootNodes: ReadonlyArray<SubsequentResultRecord>,
     streamItemsResult: StreamItemsResult,
     index: number,
   ) => void;

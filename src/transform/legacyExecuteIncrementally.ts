@@ -4,6 +4,7 @@ import type { ObjMap } from '../jsutils/ObjMap.js';
 import { addPath, pathToArray } from '../jsutils/Path.js';
 import type { PromiseOrValue } from '../jsutils/PromiseOrValue.js';
 
+import { buildBranchingExecutionPlan } from './buildBranchingExecutionPlan.js';
 import type {
   PayloadPublisher,
   SubsequentPayloadPublisher,
@@ -14,6 +15,7 @@ import type {
   ExecutionGroupResult,
   Stream,
   StreamItemsResult,
+  SubsequentResultRecord,
 } from './types.js';
 
 export interface LegacyExperimentalIncrementalExecutionResults {
@@ -58,7 +60,12 @@ export function legacyExecuteIncrementally(
 ): PromiseOrValue<
   ExecutionResult | LegacyExperimentalIncrementalExecutionResults
 > {
-  return transformResult(args, getLegacyPayloadPublisher(), prefix);
+  return transformResult(
+    args,
+    getLegacyPayloadPublisher(),
+    buildBranchingExecutionPlan,
+    prefix,
+  );
 }
 
 function getLegacyPayloadPublisher(): PayloadPublisher<
@@ -77,6 +84,7 @@ function getLegacyPayloadPublisher(): PayloadPublisher<
       addFailedDeferredFragment,
       addSuccessfulDeferredFragment,
       addFailedStream,
+      addSuccessfulStream,
       addStreamItems,
       getSubsequentPayload,
     };
@@ -102,6 +110,7 @@ function getLegacyPayloadPublisher(): PayloadPublisher<
 
     function addSuccessfulDeferredFragment(
       deferredFragment: DeferredFragment,
+      _newRootNodes: ReadonlyArray<SubsequentResultRecord>,
       executionGroupResults: ReadonlyArray<ExecutionGroupResult>,
     ): void {
       for (const executionGroupResult of executionGroupResults) {
@@ -140,8 +149,13 @@ function getLegacyPayloadPublisher(): PayloadPublisher<
       incremental.push(incrementalEntry);
     }
 
+    function addSuccessfulStream(): void {
+      // do nothing
+    }
+
     function addStreamItems(
       stream: Stream,
+      _newRootNodes: ReadonlyArray<SubsequentResultRecord>,
       streamItemsResult: StreamItemsResult,
       index: number,
     ): void {
@@ -185,6 +199,7 @@ function getLegacyPayloadPublisher(): PayloadPublisher<
   function getPayloads(
     data: ObjMap<unknown>,
     errors: ReadonlyArray<GraphQLError>,
+    _newRootNodes: ReadonlyArray<SubsequentResultRecord>,
     subsequentResults: AsyncGenerator<
       LegacySubsequentIncrementalExecutionResult,
       void,

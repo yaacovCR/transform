@@ -62,7 +62,9 @@ export interface DeferredFragment {
   originalLabel: string | undefined;
   pendingExecutionGroups: Set<PendingExecutionGroup>;
   successfulExecutionGroups: Set<ExecutionGroupResult>;
-  children: Array<SubsequentResultRecord>;
+  children: Set<SubsequentResultRecord>;
+  ready: boolean | ReadonlyArray<GraphQLError>;
+  failed: boolean | undefined;
 }
 
 export interface PendingExecutionGroup {
@@ -78,5 +80,14 @@ export interface ExecutionGroupResult {
   incrementalDataRecords: ReadonlyArray<IncrementalDataRecord>;
 }
 
+export interface FailedDeferredFragment {
+  deferredFragment: DeferredFragment;
+  errors: ReadonlyArray<GraphQLError>;
+}
+
 export type IncrementalDataRecord = PendingExecutionGroup | Stream;
-export type CompletedIncrementalData = ExecutionGroupResult | StreamItems;
+
+export type IncrementalGraphEvent =
+  | ExecutionGroupResult
+  | FailedDeferredFragment
+  | StreamItems;

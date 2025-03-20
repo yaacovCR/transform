@@ -11,13 +11,23 @@ import {
   Kind,
   TypeNameMetaFieldDef,
 } from 'graphql';
+// eslint-disable-next-line n/no-missing-import
+import type { GroupedFieldSet } from 'graphql/execution/collectFields.js';
 
 import { invariant } from '../jsutils/invariant.js';
 import { mapValue } from '../jsutils/mapValue.js';
 
+import type { DeferUsageSet, ExecutionPlan } from './buildExecutionPlan.js';
+
+export type ExecutionPlanBuilder = (
+  originalGroupedFieldSet: GroupedFieldSet,
+  parentDeferUsages?: DeferUsageSet,
+) => ExecutionPlan;
+
 export interface TransformationContext {
   transformedArgs: ValidatedExecutionArgs;
   originalLabels: Map<string, string | undefined>;
+  executionPlanBuilder: ExecutionPlanBuilder;
   prefix: string;
 }
 
@@ -29,6 +39,7 @@ interface RequestTransformationContext {
 
 export function buildTransformationContext(
   originalArgs: ValidatedExecutionArgs,
+  executionPlanBuilder: ExecutionPlanBuilder,
   prefix: string,
 ): TransformationContext {
   const { operation, fragments } = originalArgs;
@@ -66,6 +77,7 @@ export function buildTransformationContext(
   return {
     transformedArgs,
     originalLabels: context.originalLabels,
+    executionPlanBuilder,
     prefix,
   };
 }

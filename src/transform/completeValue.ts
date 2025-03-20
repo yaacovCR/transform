@@ -35,7 +35,6 @@ import type { Path } from '../jsutils/Path.js';
 import { addPath } from '../jsutils/Path.js';
 
 import type { DeferUsageSet, ExecutionPlan } from './buildExecutionPlan.js';
-import { buildExecutionPlan } from './buildExecutionPlan.js';
 import type { TransformationContext } from './buildTransformationContext.js';
 import { EmbeddedErrors } from './EmbeddedError.js';
 import type {
@@ -107,7 +106,7 @@ export function completeInitialResult(
       hideSuggestions,
     );
 
-  const { groupedFieldSet, newGroupedFieldSets } = buildExecutionPlan(
+  const { groupedFieldSet, newGroupedFieldSets } = context.executionPlanBuilder(
     originalGroupedFieldSet,
   );
 
@@ -262,6 +261,7 @@ function completeValue(
     collectSubfields(transformedArgs, runtimeType, fieldDetailsList);
 
   const { groupedFieldSet, newGroupedFieldSets } = buildSubExecutionPlan(
+    context,
     originalGroupedFieldSet,
     incrementalContext.deferUsageSet,
   );
@@ -415,7 +415,9 @@ function getNewDeferMap(
       originalLabel: context.originalLabels.get(label),
       pendingExecutionGroups: new Set(),
       successfulExecutionGroups: new Set(),
-      children: [],
+      children: new Set(),
+      ready: false,
+      failed: undefined,
     };
 
     // Update the map.
@@ -434,6 +436,7 @@ function deferredFragmentRecordFromDeferUsage(
 }
 
 function buildSubExecutionPlan(
+  context: TransformationContext,
   originalGroupedFieldSet: GroupedFieldSet,
   deferUsageSet: DeferUsageSet | undefined,
 ): ExecutionPlan {
@@ -443,7 +446,10 @@ function buildSubExecutionPlan(
   if (executionPlan !== undefined) {
     return executionPlan;
   }
-  executionPlan = buildExecutionPlan(originalGroupedFieldSet, deferUsageSet);
+  executionPlan = context.executionPlanBuilder(
+    originalGroupedFieldSet,
+    deferUsageSet,
+  );
   (
     originalGroupedFieldSet as unknown as { _executionPlan: ExecutionPlan }
   )._executionPlan = executionPlan;

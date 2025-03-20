@@ -17,17 +17,32 @@ import { isPromise } from '../jsutils/isPromise.js';
 import type { ObjMap } from '../jsutils/ObjMap.js';
 import type { PromiseOrValue } from '../jsutils/PromiseOrValue.js';
 
-import type { TransformationContext } from './buildTransformationContext.js';
+import { buildExecutionPlan } from './buildExecutionPlan.js';
+import type {
+  ExecutionPlanBuilder,
+  TransformationContext,
+} from './buildTransformationContext.js';
 import { buildTransformationContext } from './buildTransformationContext.js';
 import { completeInitialResult } from './completeValue.js';
 import { embedErrors } from './embedErrors.js';
+import { getDefaultPayloadPublisher } from './getDefaultPayloadPublisher.js';
 import { IncrementalPublisher } from './IncrementalPublisher.js';
 import type { PayloadPublisher } from './PayloadPublisher.js';
 import type { IncrementalDataRecord } from './types.js';
 
-export function transformResult<TSubsequent, TIncremental>(
+export function transformResult<
+  TSubsequent = SubsequentIncrementalExecutionResult,
+  TIncremental = ExperimentalIncrementalExecutionResults,
+>(
   args: ExecutionArgs,
-  payloadPublisher: PayloadPublisher<TSubsequent, TIncremental>,
+  payloadPublisher: PayloadPublisher<
+    TSubsequent,
+    TIncremental
+  > = getDefaultPayloadPublisher() as unknown as PayloadPublisher<
+    TSubsequent,
+    TIncremental
+  >,
+  executionPlanBuilder: ExecutionPlanBuilder = buildExecutionPlan,
   prefix = '__transformResult__',
 ): PromiseOrValue<ExecutionResult | TIncremental> {
   const originalArgs = validateExecutionArgs(args);
@@ -36,7 +51,11 @@ export function transformResult<TSubsequent, TIncremental>(
     return { errors: originalArgs };
   }
 
-  const context = buildTransformationContext(originalArgs, prefix);
+  const context = buildTransformationContext(
+    originalArgs,
+    executionPlanBuilder,
+    prefix,
+  );
 
   const originalResult = experimentalExecuteQueryOrMutationOrSubscriptionEvent(
     context.transformedArgs,
@@ -101,15 +120,14 @@ function buildIncrementalResponse<TSubsequent, TIncremental>(
 
   const incrementalPublisher = new IncrementalPublisher(
     originalData,
-    incrementalDataRecords,
-    payloadPublisher.getSubsequentPayloadPublisher(),
+    payloadPublisher,
     pending,
     subsequentResults,
   );
 
-  return payloadPublisher.getPayloads(
+  return incrementalPublisher.buildResponse(
     data,
     errors,
-    incrementalPublisher.subscribe(),
+    incrementalDataRecords,
   );
 }
