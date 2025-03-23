@@ -28,6 +28,7 @@ import { embedErrors } from './embedErrors.js';
 import { getDefaultPayloadPublisher } from './getDefaultPayloadPublisher.js';
 import { IncrementalPublisher } from './IncrementalPublisher.js';
 import type { PayloadPublisher } from './PayloadPublisher.js';
+import { transformForTargetSubschema } from './transformForTargetSubschema.js';
 import type { IncrementalDataRecord } from './types.js';
 
 export function transformResult<
@@ -57,8 +58,13 @@ export function transformResult<
     prefix,
   );
 
+  const argsForTargetSubschema = transformForTargetSubschema(
+    context.argsWithNewLabels,
+    prefix,
+  );
+
   const originalResult = experimentalExecuteQueryOrMutationOrSubscriptionEvent(
-    context.transformedArgs,
+    argsForTargetSubschema,
   );
 
   return isPromise(originalResult)

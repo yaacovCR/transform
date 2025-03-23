@@ -91,7 +91,7 @@ export function completeInitialResult(
   };
 
   const { schema, operation, fragments, variableValues, hideSuggestions } =
-    context.transformedArgs;
+    context.argsWithNewLabels;
 
   const rootType = schema.getRootType(operation.operation);
   invariant(rootType != null);
@@ -243,7 +243,7 @@ function completeValue(
 
   invariant(isObjectLike(result));
 
-  const { prefix, transformedArgs } = context;
+  const { prefix, argsWithNewLabels } = context;
 
   const typeName = result[prefix];
 
@@ -253,12 +253,12 @@ function completeValue(
 
   invariant(typeof typeName === 'string');
 
-  const runtimeType = transformedArgs.schema.getType(typeName);
+  const runtimeType = argsWithNewLabels.schema.getType(typeName);
 
   invariant(isObjectType(runtimeType));
 
   const { groupedFieldSet: originalGroupedFieldSet, newDeferUsages } =
-    collectSubfields(transformedArgs, runtimeType, fieldDetailsList);
+    collectSubfields(argsWithNewLabels, runtimeType, fieldDetailsList);
 
   const { groupedFieldSet, newGroupedFieldSets } = buildSubExecutionPlan(
     context,
@@ -302,15 +302,10 @@ export function completeObjectValue(
   deferMap: ReadonlyMap<DeferUsage, DeferredFragment> | undefined,
 ): ObjMap<unknown> {
   const {
-    prefix,
-    transformedArgs: { schema },
+    argsWithNewLabels: { schema },
   } = context;
   const completed = Object.create(null);
   for (const [responseName, fieldDetailsList] of groupedFieldSet) {
-    if (responseName === prefix) {
-      continue;
-    }
-
     const fieldName = fieldDetailsList[0].node.name.value;
     const fieldDef = schema.getField(runtimeType, fieldName);
 
@@ -552,7 +547,7 @@ function getStreamUsage(
   const stream = getDirectiveValues(
     GraphQLStreamDirective,
     fieldDetails.node,
-    context.transformedArgs.variableValues,
+    context.argsWithNewLabels.variableValues,
     fieldDetails.fragmentVariableValues,
   );
 
