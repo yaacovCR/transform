@@ -1,5 +1,12 @@
 # @yaacovcr/transform
 
+## 0.0.3
+
+### Patch Changes
+
+- 13dbde4: Support transformation of incremental GraphQL results utilizing either new and legacy formats
+- 13dbde4: Add ability to transform leaf values based on the type
+
 ## 0.0.2
 
 ### Patch Changes
