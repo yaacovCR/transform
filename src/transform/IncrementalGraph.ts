@@ -382,7 +382,28 @@ export class IncrementalGraph {
         // eslint-disable-next-line no-await-in-loop
         await Promise.resolve();
       }
-      items.push(value.item);
+      const item = value.item;
+      if (item === undefined) {
+        // TODO: add test case for failure via transformation with existing items
+        /* c8 ignore start */
+        if (items.length > 0) {
+          this._enqueue({
+            stream,
+            result: {
+              items,
+              errors,
+              incrementalDataRecords,
+            },
+          });
+        }
+        /* c8 ignore stop */
+        this._enqueue({
+          stream,
+          errors: value.errors,
+        });
+        return;
+      }
+      items.push(item);
       errors.push(...value.errors);
       incrementalDataRecords.push(...value.incrementalDataRecords);
     }

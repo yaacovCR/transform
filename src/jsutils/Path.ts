@@ -1,7 +1,7 @@
 export interface Path {
   readonly prev: Path | undefined;
   readonly key: string | number;
-  readonly typename: string | undefined;
+  readonly nullable: boolean;
 }
 
 /**
@@ -10,9 +10,9 @@ export interface Path {
 export function addPath(
   prev: Readonly<Path> | undefined,
   key: string | number,
-  typename: string | undefined,
+  nullable: boolean,
 ): Path {
-  return { prev, key, typename };
+  return { prev, key, nullable };
 }
 
 /**

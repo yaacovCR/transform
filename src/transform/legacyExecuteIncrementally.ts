@@ -1,7 +1,7 @@
 import type { ExecutionArgs, ExecutionResult, GraphQLError } from 'graphql';
 
 import type { ObjMap } from '../jsutils/ObjMap.js';
-import { addPath, pathToArray } from '../jsutils/Path.js';
+import { pathToArray } from '../jsutils/Path.js';
 import type { PromiseOrValue } from '../jsutils/PromiseOrValue.js';
 
 import { buildBranchingExecutionPlan } from './buildBranchingExecutionPlan.js';
@@ -62,6 +62,7 @@ export function legacyExecuteIncrementally(
 > {
   return transformResult(
     args,
+    undefined,
     getLegacyPayloadPublisher(),
     buildBranchingExecutionPlan,
     prefix,
@@ -139,7 +140,7 @@ function getLegacyPayloadPublisher(): PayloadPublisher<
       const incrementalEntry: LegacyIncrementalStreamResult = {
         errors,
         items: null,
-        path: pathToArray(addPath(path, index, undefined)),
+        path: [...pathToArray(path), index],
       };
       // TODO: add test case
       /* c8 ignore next 3 */
@@ -163,7 +164,7 @@ function getLegacyPayloadPublisher(): PayloadPublisher<
       const { items, errors } = streamItemsResult;
       const newIncrementalResult: LegacyIncrementalStreamResult = {
         items,
-        path: pathToArray(addPath(path, index, undefined)),
+        path: [...pathToArray(path), index],
       };
       if (errors.length > 0) {
         newIncrementalResult.errors = errors;

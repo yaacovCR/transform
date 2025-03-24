@@ -1,16 +1,19 @@
 import type {
   GraphQLError,
+  GraphQLLeafType,
+  GraphQLNullableOutputType,
   GraphQLObjectType,
   GraphQLOutputType,
   ValidatedExecutionArgs,
 } from 'graphql';
 import {
   getDirectiveValues,
+  getNullableType,
   GraphQLStreamDirective,
   isLeafType,
   isListType,
-  isNonNullType,
   isObjectType,
+  locatedError,
 } from 'graphql';
 import type {
   DeferUsage,
@@ -23,20 +26,22 @@ import {
   collectSubfields as _collectSubfields,
   // eslint-disable-next-line n/no-missing-import
 } from 'graphql/execution/collectFields.js';
-// eslint-disable-next-line n/no-missing-import
-import { pathToArray } from 'graphql/jsutils/Path.js';
 
 import { BoxedPromiseOrValue } from '../jsutils/BoxedPromiseOrValue.js';
 import { invariant } from '../jsutils/invariant.js';
 import { isObjectLike } from '../jsutils/isObjectLike.js';
+import { isPromise } from '../jsutils/isPromise.js';
 import { memoize3 } from '../jsutils/memoize3.js';
 import type { ObjMap } from '../jsutils/ObjMap.js';
 import type { Path } from '../jsutils/Path.js';
-import { addPath } from '../jsutils/Path.js';
+import { addPath, pathToArray } from '../jsutils/Path.js';
+import type { PromiseOrValue } from '../jsutils/PromiseOrValue.js';
+import { PromiseRegistry } from '../jsutils/PromiseRegistry.js';
 
 import type { DeferUsageSet, ExecutionPlan } from './buildExecutionPlan.js';
 import type { TransformationContext } from './buildTransformationContext.js';
 import { EmbeddedErrors } from './EmbeddedError.js';
+import { filter } from './filter.js';
 import type {
   DeferredFragment,
   ExecutionGroupResult,
@@ -47,7 +52,9 @@ import type {
 } from './types.js';
 
 interface IncrementalContext {
-  errors: Map<Path | undefined, GraphQLError>;
+  promiseRegistry: PromiseRegistry;
+  newErrors: Map<Path | undefined, GraphQLError>;
+  originalErrors: Array<GraphQLError>;
   incrementalDataRecords: Array<IncrementalDataRecord>;
   deferUsageSet: DeferUsageSet | undefined;
 }
@@ -79,13 +86,15 @@ const collectSubfields = memoize3(
 export function completeInitialResult(
   context: TransformationContext,
   originalData: ObjMap<unknown>,
-): {
+): PromiseOrValue<{
   data: ObjMap<unknown>;
   errors: ReadonlyArray<GraphQLError>;
   incrementalDataRecords: ReadonlyArray<IncrementalDataRecord>;
-} {
+}> {
   const incrementalContext: IncrementalContext = {
-    errors: new Map(),
+    promiseRegistry: new PromiseRegistry(),
+    newErrors: new Map(),
+    originalErrors: [],
     incrementalDataRecords: [],
     deferUsageSet: undefined,
   };
@@ -132,101 +141,76 @@ export function completeInitialResult(
     newDeferMap,
   );
 
-  const errors = incrementalContext.errors;
-  return {
-    data: completed,
-    errors: Array.from(errors.values()),
-    incrementalDataRecords: filterIncrementalDataRecords(
-      undefined,
-      errors,
-      incrementalContext.incrementalDataRecords,
-    ),
-  };
+  const promiseRegistry = incrementalContext.promiseRegistry;
+  return promiseRegistry.pending()
+    ? promiseRegistry
+        .wait()
+        .then(() => resolveInitialResult(completed, incrementalContext))
+    : resolveInitialResult(completed, incrementalContext);
 }
 
-function filterIncrementalDataRecords(
-  initialPath: Path | undefined,
-  errors: ReadonlyMap<Path | undefined, GraphQLError>,
-  incrementalDataRecords: ReadonlyArray<IncrementalDataRecord>,
-): ReadonlyArray<IncrementalDataRecord> {
-  const filteredIncrementalDataRecords: Array<IncrementalDataRecord> = [];
-  for (const incrementalDataRecord of incrementalDataRecords) {
-    let currentPath: Path | undefined = incrementalDataRecord.path;
+function resolveInitialResult(
+  completedObject: ObjMap<unknown>,
+  incrementalContext: IncrementalContext,
+): {
+  data: ObjMap<unknown>;
+  errors: ReadonlyArray<GraphQLError>;
+  incrementalDataRecords: ReadonlyArray<IncrementalDataRecord>;
+} {
+  const { newErrors, originalErrors, incrementalDataRecords } =
+    incrementalContext;
 
-    // TODO: add test case - filtering atm not necessary unless we add transformations that can return new nulls
-    /* c8 ignore next 3 */
-    if (errors.has(currentPath)) {
-      continue;
-    }
+  const { filteredData, filteredRecords } = filter(
+    completedObject,
+    undefined,
+    newErrors,
+    incrementalDataRecords,
+  );
 
-    const paths: Array<Path | undefined> = [currentPath];
-    let filtered = false;
-    while (currentPath !== initialPath) {
-      // Because currentPath leads to initialPath or is undefined, and the
-      // loop will exit if initialPath is undefined, currentPath must be
-      // defined.
-      // TODO: Consider, however, adding an invariant.
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-      currentPath = currentPath!.prev;
-      // TODO: add test case - filtering atm not necessary unless we add transformations that can return new nulls
-      /* c8 ignore next 4 */
-      if (errors.has(currentPath)) {
-        filtered = true;
-        break;
-      }
-      paths.push(currentPath);
-    }
-
-    if (!filtered) {
-      filteredIncrementalDataRecords.push(incrementalDataRecord);
-    }
-  }
-
-  return filteredIncrementalDataRecords;
+  return {
+    data: filteredData,
+    errors: [...originalErrors, ...newErrors.values()],
+    incrementalDataRecords: filteredRecords,
+  };
 }
 
 // eslint-disable-next-line @typescript-eslint/max-params
 function completeValue(
   context: TransformationContext,
-  returnType: GraphQLOutputType,
+  nullableType: GraphQLNullableOutputType,
   fieldDetailsList: ReadonlyArray<FieldDetails>,
   result: unknown,
   path: Path,
   incrementalContext: IncrementalContext,
   deferMap: ReadonlyMap<DeferUsage, DeferredFragment> | undefined,
-): unknown {
-  if (isNonNullType(returnType)) {
-    return completeValue(
-      context,
-      returnType.ofType,
-      fieldDetailsList,
-      result,
-      path,
-      incrementalContext,
-      deferMap,
-    );
-  }
-
+): PromiseOrValue<unknown> {
   if (result == null) {
     return null;
   }
 
   if (result instanceof EmbeddedErrors) {
-    const errors = incrementalContext.errors;
+    const originalErrors = incrementalContext.originalErrors;
     for (const error of result.errors) {
-      errors.set(path, error);
+      originalErrors.push(error);
     }
     return null;
   }
 
-  if (isLeafType(returnType)) {
-    return result;
+  if (isLeafType(nullableType)) {
+    return maybeTransformLeafValue(
+      context,
+      nullableType,
+      fieldDetailsList,
+      result,
+      path,
+      incrementalContext,
+    );
   }
 
-  if (isListType(returnType)) {
+  if (isListType(nullableType)) {
     invariant(Array.isArray(result));
 
-    const itemType = returnType.ofType;
+    const itemType = nullableType.ofType;
 
     const completed = completeListValue(
       context,
@@ -292,7 +276,86 @@ function completeValue(
 }
 
 // eslint-disable-next-line @typescript-eslint/max-params
-export function completeObjectValue(
+function maybeTransformLeafValue(
+  context: TransformationContext,
+  type: GraphQLLeafType,
+  fieldDetailsList: ReadonlyArray<FieldDetails>,
+  value: unknown,
+  path: Path,
+  incrementalContext: IncrementalContext,
+): PromiseOrValue<unknown> {
+  const transformer = context.leafTransformers[type.name];
+  if (transformer === undefined) {
+    return value;
+  }
+
+  try {
+    const transformed = transformer(value, type);
+
+    if (isPromise(transformed)) {
+      return transformed
+        .then((resolved: unknown) =>
+          handleTransformed(
+            resolved,
+            fieldDetailsList,
+            path,
+            incrementalContext,
+          ),
+        )
+        .then(undefined, (rawError: unknown) =>
+          handleRawError(rawError, fieldDetailsList, path, incrementalContext),
+        );
+    }
+
+    return handleTransformed(
+      transformed,
+      fieldDetailsList,
+      path,
+      incrementalContext,
+    );
+  } catch (rawError) {
+    return handleRawError(rawError, fieldDetailsList, path, incrementalContext);
+  }
+}
+
+function handleTransformed(
+  transformed: unknown,
+  fieldDetailsList: ReadonlyArray<FieldDetails>,
+  path: Path,
+  incrementalContext: IncrementalContext,
+): unknown {
+  if (transformed === null) {
+    if (!path.nullable) {
+      const fieldName = fieldDetailsList[0].node.name.value;
+      throw new Error(
+        `Cannot return null for non-nullable field ${fieldName}.`,
+      );
+    }
+    return null;
+  } else if (transformed instanceof Error) {
+    handleRawError(transformed, fieldDetailsList, path, incrementalContext);
+    return null;
+  }
+  return transformed;
+}
+
+function handleRawError(
+  rawError: unknown,
+  fieldDetailsList: ReadonlyArray<FieldDetails>,
+  path: Path,
+  incrementalContext: IncrementalContext,
+): null {
+  const error = locatedError(
+    rawError,
+    fieldDetailsList.map((f) => f.node),
+    pathToArray(path),
+  );
+  incrementalContext.newErrors.set(path, error);
+  return null;
+}
+
+// eslint-disable-next-line @typescript-eslint/max-params
+function completeObjectValue(
   context: TransformationContext,
   groupedFieldSet: GroupedFieldSet,
   runtimeType: GraphQLObjectType,
@@ -304,29 +367,43 @@ export function completeObjectValue(
   const {
     argsWithNewLabels: { schema },
   } = context;
-  const completed = Object.create(null);
+  const completedObject = Object.create(null);
+
   for (const [responseName, fieldDetailsList] of groupedFieldSet) {
     const fieldName = fieldDetailsList[0].node.name.value;
     const fieldDef = schema.getField(runtimeType, fieldName);
 
     if (fieldDef) {
-      completed[responseName] = completeValue(
+      const fieldType = fieldDef.type;
+      const nullableType = getNullableType(fieldType);
+      const completed = completeValue(
         context,
-        fieldDef.type,
+        nullableType,
         fieldDetailsList,
         originalData[responseName],
-        addPath(path, responseName, undefined),
+        addPath(path, responseName, nullableType === fieldType),
         incrementalContext,
         deferMap,
       );
+
+      if (isPromise(completed)) {
+        completedObject[responseName] = undefined;
+        incrementalContext.promiseRegistry.add(
+          completed.then((resolved) => {
+            completedObject[responseName] = resolved;
+          }),
+        );
+      } else {
+        completedObject[responseName] = completed;
+      }
     }
   }
 
-  return completed;
+  return completedObject;
 }
 
 // eslint-disable-next-line @typescript-eslint/max-params
-export function completeListValue(
+function completeListValue(
   context: TransformationContext,
   itemType: GraphQLOutputType,
   fieldDetailsList: ReadonlyArray<FieldDetails>,
@@ -352,16 +429,30 @@ export function completeListValue(
       return completedItems;
     }
 
-    const completed = completeValue(
+    const nullableType = getNullableType(itemType);
+    const completedItem = completeValue(
       context,
-      itemType,
+      nullableType,
       fieldDetailsList,
       result[index],
-      addPath(path, index, undefined),
+      addPath(path, index, nullableType === itemType),
       incrementalContext,
       deferMap,
     );
-    completedItems.push(completed);
+
+    // TODO: add test case
+    /* c8 ignore start */
+    if (isPromise(completedItem)) {
+      completedItems.push(undefined);
+      incrementalContext.promiseRegistry.add(
+        completedItem.then((resolved) => {
+          completedItems[index] = resolved;
+        }),
+      );
+    } else {
+      /* c8 ignore stop */
+      completedItems.push(completedItem);
+    }
   }
 
   if (streamUsage && result.length >= streamUsage.initialCount) {
@@ -481,7 +572,9 @@ function collectExecutionGroups(
           groupedFieldSet,
           runtimeType,
           {
-            errors: new Map(),
+            promiseRegistry: new PromiseRegistry(),
+            newErrors: new Map(),
+            originalErrors: [],
             incrementalDataRecords: [],
             deferUsageSet,
           },
@@ -512,24 +605,55 @@ function executeExecutionGroup(
   runtimeType: GraphQLObjectType,
   incrementalContext: IncrementalContext,
   deferMap: ReadonlyMap<DeferUsage, DeferredFragment>,
+): PromiseOrValue<ExecutionGroupResult> {
+  const completed = completeObjectValue(
+    context,
+    groupedFieldSet,
+    runtimeType,
+    result,
+    path,
+    incrementalContext,
+    deferMap,
+  );
+
+  const promiseRegistry = incrementalContext.promiseRegistry;
+  return promiseRegistry.pending()
+    ? promiseRegistry
+        .wait()
+        .then(() =>
+          resolveExecutionGroupResult(
+            completed,
+            pendingExecutionGroup,
+            incrementalContext,
+          ),
+        )
+    : resolveExecutionGroupResult(
+        completed,
+        pendingExecutionGroup,
+        incrementalContext,
+      );
+}
+
+function resolveExecutionGroupResult(
+  completedObject: ObjMap<unknown>,
+  pendingExecutionGroup: PendingExecutionGroup,
+  incrementalContext: IncrementalContext,
 ): ExecutionGroupResult {
+  const { newErrors, originalErrors, incrementalDataRecords } =
+    incrementalContext;
+
+  const { filteredData, filteredRecords } = filter(
+    completedObject,
+    pendingExecutionGroup.path,
+    newErrors,
+    incrementalDataRecords,
+  );
+
   return {
     pendingExecutionGroup,
-    data: completeObjectValue(
-      context,
-      groupedFieldSet,
-      runtimeType,
-      result,
-      path,
-      incrementalContext,
-      deferMap,
-    ),
-    errors: Array.from(incrementalContext.errors.values()),
-    incrementalDataRecords: filterIncrementalDataRecords(
-      pendingExecutionGroup.path,
-      incrementalContext.errors,
-      incrementalContext.incrementalDataRecords,
-    ),
+    data: filteredData,
+    errors: [...originalErrors, ...newErrors.values()],
+    incrementalDataRecords: filteredRecords,
   };
 }
 
@@ -607,7 +731,9 @@ function maybeAddStream(
         path,
         index,
         {
-          errors: new Map(),
+          promiseRegistry: new PromiseRegistry(),
+          newErrors: new Map(),
+          originalErrors: [],
           incrementalDataRecords: [],
           deferUsageSet: undefined,
         },
@@ -626,22 +752,70 @@ function executeStreamItem(
   path: Path,
   index: number,
   incrementalContext: IncrementalContext,
+): PromiseOrValue<StreamItemResult> {
+  const nullableType = getNullableType(itemType);
+  const completed = completeValue(
+    context,
+    nullableType,
+    fieldDetailsList,
+    result[index],
+    addPath(path, index, nullableType === itemType),
+    incrementalContext,
+    undefined,
+  );
+
+  if (isPromise(completed)) {
+    return completed.then((resolved) =>
+      resolveStreamItemResult(resolved, path, incrementalContext),
+    );
+  }
+  return resolveStreamItemResult(completed, path, incrementalContext);
+}
+
+function resolveStreamItemResult(
+  completedItem: unknown,
+  path: Path,
+  incrementalContext: IncrementalContext,
+): PromiseOrValue<StreamItemResult> {
+  const promiseRegistry = incrementalContext.promiseRegistry;
+  // TODO: add test case?
+  return promiseRegistry.pending()
+    ? /* c8 ignore start */ promiseRegistry
+        .wait()
+        .then(() =>
+          buildStreamItemResult(completedItem, path, incrementalContext),
+        )
+    : /* c8 ignore stop */ buildStreamItemResult(
+        completedItem,
+        path,
+        incrementalContext,
+      );
+}
+
+function buildStreamItemResult(
+  completedItem: unknown,
+  path: Path,
+  incrementalContext: IncrementalContext,
 ): StreamItemResult {
+  const { newErrors, originalErrors, incrementalDataRecords } =
+    incrementalContext;
+
+  const errors = [...originalErrors, ...newErrors.values()];
+
+  const { filteredData, filteredRecords } = filter(
+    [completedItem],
+    path,
+    newErrors,
+    incrementalDataRecords,
+  );
+
+  if (filteredData === null) {
+    return { errors };
+  }
+
   return {
-    item: completeValue(
-      context,
-      itemType,
-      fieldDetailsList,
-      result[index],
-      addPath(path, index, undefined),
-      incrementalContext,
-      undefined,
-    ),
-    errors: Array.from(incrementalContext.errors.values()),
-    incrementalDataRecords: filterIncrementalDataRecords(
-      path,
-      incrementalContext.errors,
-      incrementalContext.incrementalDataRecords,
-    ),
+    item: filteredData[0],
+    errors,
+    incrementalDataRecords: filteredRecords,
   };
 }

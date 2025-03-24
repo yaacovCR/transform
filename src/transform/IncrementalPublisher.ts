@@ -217,6 +217,24 @@ export class IncrementalPublisher<TSubsequent, TIncremental> {
   private _handleCompletedExecutionGroup(
     executionGroupResult: ExecutionGroupResult,
   ): void {
+    if (executionGroupResult.data === null) {
+      for (const deferredFragment of executionGroupResult.pendingExecutionGroup
+        .deferredFragments) {
+        // TODO: add test case for failure of an already failed fragment via transformation
+        /* c8 ignore next 3 */
+        if (deferredFragment.failed) {
+          continue;
+        }
+        this._incrementalGraph.removeDeferredFragment(deferredFragment);
+
+        this._subsequentPayloadPublisher.addFailedDeferredFragment(
+          deferredFragment,
+          executionGroupResult.errors,
+        );
+      }
+      return;
+    }
+
     this._incrementalGraph.addCompletedSuccessfulExecutionGroup(
       executionGroupResult,
     );

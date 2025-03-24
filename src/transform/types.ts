@@ -17,10 +17,20 @@ export interface Stream {
   pending: boolean;
 }
 
-export interface StreamItemResult {
+export type StreamItemResult =
+  | SuccessfulStreamItemResult
+  | FailedStreamItemResult;
+
+interface SuccessfulStreamItemResult {
   item: unknown;
   errors: ReadonlyArray<GraphQLError>;
   incrementalDataRecords: ReadonlyArray<IncrementalDataRecord>;
+}
+
+interface FailedStreamItemResult {
+  item?: never;
+  errors: ReadonlyArray<GraphQLError>;
+  incrementalDataRecords?: never;
 }
 
 type Thunk<T> = T | (() => T);

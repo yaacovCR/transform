@@ -21,6 +21,7 @@ import { buildExecutionPlan } from './buildExecutionPlan.js';
 import type {
   ExecutionPlanBuilder,
   TransformationContext,
+  Transformers,
 } from './buildTransformationContext.js';
 import { buildTransformationContext } from './buildTransformationContext.js';
 import { completeInitialResult } from './completeValue.js';
@@ -36,6 +37,7 @@ export function transformResult<
   TIncremental = ExperimentalIncrementalExecutionResults,
 >(
   args: ExecutionArgs,
+  transformers: Transformers = { leafTransformers: {} },
   payloadPublisher: PayloadPublisher<
     TSubsequent,
     TIncremental
@@ -54,6 +56,7 @@ export function transformResult<
 
   const context = buildTransformationContext(
     originalArgs,
+    transformers,
     executionPlanBuilder,
     prefix,
   );
@@ -78,20 +81,33 @@ function transformOriginalResult<TSubsequent, TIncremental>(
   context: TransformationContext,
   result: ExecutionResult | ExperimentalIncrementalExecutionResults,
   payloadPublisher: PayloadPublisher<TSubsequent, TIncremental>,
-): ExecutionResult | TIncremental {
+): PromiseOrValue<ExecutionResult | TIncremental> {
   if ('initialResult' in result) {
     const { initialResult, subsequentResults } = result;
     const { data, errors, pending } = initialResult;
 
     embedErrors(data, errors);
 
-    return buildIncrementalResponse(
-      data,
-      completeInitialResult(context, data),
-      payloadPublisher,
-      pending,
-      subsequentResults,
-    );
+    const completed = completeInitialResult(context, data);
+
+    // TODO: add test case
+    return isPromise(completed) /* c8 ignore start */
+      ? completed.then((resolved) =>
+          buildIncrementalResponse(
+            data,
+            resolved,
+            payloadPublisher,
+            pending,
+            subsequentResults,
+          ),
+        )
+      : /* c8 ignore stop */ buildIncrementalResponse(
+          data,
+          completed,
+          payloadPublisher,
+          pending,
+          subsequentResults,
+        );
   }
 
   const { data: originalData, errors: originalErrors } = result;
@@ -101,6 +117,18 @@ function transformOriginalResult<TSubsequent, TIncremental>(
 
   embedErrors(originalData, originalErrors);
   const completed = completeInitialResult(context, originalData);
+
+  if (isPromise(completed)) {
+    return completed.then((resolved) => {
+      const { incrementalDataRecords } = resolved;
+      if (incrementalDataRecords.length === 0) {
+        const { data, errors } = resolved;
+        return errors.length === 0 ? { data } : { errors, data };
+      } /* c8 ignore start */
+      // TODO: add test case
+      return buildIncrementalResponse(originalData, resolved, payloadPublisher);
+    }); /* c8 ignore start */
+  }
 
   const { incrementalDataRecords } = completed;
   if (incrementalDataRecords.length === 0) {
