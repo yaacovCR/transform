@@ -5,19 +5,19 @@
 Using npm:
 
 ```
-npm install --save <package>
+npm install @yaacovCR/transform graphql@17.0.0-alpha.8
 ```
 
 Using yarn:
 
 ```
-yarn add <package>
+yarn add @yaacovCR/transform graphql@17.0.0-alpha.8
 ```
 
 Using pnpm:
 
 ```
-pnpm add <package>
+pnpm add @yaacovCR/transform graphql@17.0.0-alpha.8
 ```
 
 ## Overview
