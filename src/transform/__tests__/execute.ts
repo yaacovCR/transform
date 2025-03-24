@@ -1,13 +1,16 @@
-import type { ExecutionArgs, ExecutionResult } from 'graphql';
+import type {
+  ExecutionArgs,
+  ExecutionResult,
+  ExperimentalIncrementalExecutionResults,
+} from 'graphql';
 
 import { isPromise } from '../../jsutils/isPromise.js';
 import type { PromiseOrValue } from '../../jsutils/PromiseOrValue.js';
 
-import { legacyExecuteIncrementally } from '../legacyExecuteIncrementally.js';
-import type { LegacyExperimentalIncrementalExecutionResults } from '../PayloadPublisher.js';
+import { transformResult } from '../transformResult.js';
 
 export function executeSync(args: ExecutionArgs): ExecutionResult {
-  const result = legacyExecuteIncrementally(args);
+  const result = transformResult(args);
 
   // Assert that the execution was synchronous.
   if (isPromise(result) || 'initialResult' in result) {
@@ -19,8 +22,6 @@ export function executeSync(args: ExecutionArgs): ExecutionResult {
 
 export function execute(
   args: ExecutionArgs,
-): PromiseOrValue<
-  ExecutionResult | LegacyExperimentalIncrementalExecutionResults
-> {
-  return legacyExecuteIncrementally(args);
+): PromiseOrValue<ExecutionResult | ExperimentalIncrementalExecutionResults> {
+  return transformResult(args);
 }

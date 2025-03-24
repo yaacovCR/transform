@@ -1,11 +1,10 @@
 import type {
   DeferUsage,
-  FieldDetails,
+  FieldDetailsList,
   GroupedFieldSet,
   // eslint-disable-next-line n/no-missing-import
 } from 'graphql/execution/collectFields.js';
 
-import { AccumulatorMap } from '../jsutils/AccumulatorMap.js';
 import { getBySet } from '../jsutils/getBySet.js';
 import { isSameSet } from '../jsutils/isSameSet.js';
 
@@ -20,35 +19,58 @@ export function buildExecutionPlan(
   originalGroupedFieldSet: GroupedFieldSet,
   parentDeferUsages: DeferUsageSet = new Set<DeferUsage>(),
 ): ExecutionPlan {
-  const groupedFieldSet = new AccumulatorMap<string, FieldDetails>();
-
+  const groupedFieldSet = new Map<string, FieldDetailsList>();
   const newGroupedFieldSets = new Map<
     DeferUsageSet,
-    AccumulatorMap<string, FieldDetails>
+    Map<string, FieldDetailsList>
   >();
+  for (const [responseKey, fieldDetailsList] of originalGroupedFieldSet) {
+    const filteredDeferUsageSet = getFilteredDeferUsageSet(fieldDetailsList);
 
-  for (const [responseKey, fieldGroup] of originalGroupedFieldSet) {
-    for (const fieldDetails of fieldGroup) {
-      const deferUsage = fieldDetails.deferUsage;
-      const deferUsageSet =
-        deferUsage === undefined
-          ? new Set<DeferUsage>()
-          : new Set([deferUsage]);
-      if (isSameSet(parentDeferUsages, deferUsageSet)) {
-        groupedFieldSet.add(responseKey, fieldDetails);
-      } else {
-        let newGroupedFieldSet = getBySet(newGroupedFieldSets, deferUsageSet);
-        if (newGroupedFieldSet === undefined) {
-          newGroupedFieldSet = new AccumulatorMap();
-          newGroupedFieldSets.set(deferUsageSet, newGroupedFieldSet);
-        }
-        newGroupedFieldSet.add(responseKey, fieldDetails);
-      }
+    if (isSameSet(filteredDeferUsageSet, parentDeferUsages)) {
+      groupedFieldSet.set(responseKey, fieldDetailsList);
+      continue;
     }
+
+    let newGroupedFieldSet = getBySet(
+      newGroupedFieldSets,
+      filteredDeferUsageSet,
+    );
+    if (newGroupedFieldSet === undefined) {
+      newGroupedFieldSet = new Map();
+      newGroupedFieldSets.set(filteredDeferUsageSet, newGroupedFieldSet);
+    }
+    newGroupedFieldSet.set(responseKey, fieldDetailsList);
   }
 
   return {
     groupedFieldSet,
     newGroupedFieldSets,
   };
+}
+
+function getFilteredDeferUsageSet(
+  fieldDetailsList: FieldDetailsList,
+): ReadonlySet<DeferUsage> {
+  const filteredDeferUsageSet = new Set<DeferUsage>();
+  for (const fieldDetails of fieldDetailsList) {
+    const deferUsage = fieldDetails.deferUsage;
+    if (deferUsage === undefined) {
+      filteredDeferUsageSet.clear();
+      return filteredDeferUsageSet;
+    }
+    filteredDeferUsageSet.add(deferUsage);
+  }
+
+  for (const deferUsage of filteredDeferUsageSet) {
+    let parentDeferUsage: DeferUsage | undefined = deferUsage.parentDeferUsage;
+    while (parentDeferUsage !== undefined) {
+      if (filteredDeferUsageSet.has(parentDeferUsage)) {
+        filteredDeferUsageSet.delete(deferUsage);
+        break;
+      }
+      parentDeferUsage = parentDeferUsage.parentDeferUsage;
+    }
+  }
+  return filteredDeferUsageSet;
 }

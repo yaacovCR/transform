@@ -11,6 +11,7 @@ import { describe, it } from 'mocha';
 
 import { invariant } from '../../jsutils/invariant.js';
 
+import { buildExecutionPlan } from '../buildExecutionPlan.js';
 import { buildTransformationContext } from '../buildTransformationContext.js';
 
 const schema = new GraphQLSchema({
@@ -31,12 +32,14 @@ describe('buildTransformationContext', () => {
 
     const context = buildTransformationContext(
       validatedExecutionArgs,
+      { leafTransformers: {} },
+      buildExecutionPlan,
       '__prefix__',
     );
 
     expect(context.originalLabels instanceof Map).to.equal(true);
+    expect(context.executionPlanBuilder).to.equal(buildExecutionPlan);
     expect(context.prefix).to.equal('__prefix__');
-    expect(context.mergedResult).to.deep.equal({});
   });
 
   it('should handle non-standard directives', () => {
@@ -48,7 +51,12 @@ describe('buildTransformationContext', () => {
     invariant('schema' in validatedExecutionArgs);
 
     expect(() =>
-      buildTransformationContext(validatedExecutionArgs, '__prefix__'),
+      buildTransformationContext(
+        validatedExecutionArgs,
+        { leafTransformers: {} },
+        buildExecutionPlan,
+        '__prefix__',
+      ),
     ).not.to.throw();
   });
 });

@@ -1,5 +1,9 @@
 import { expect } from 'chai';
-import type { DocumentNode } from 'graphql';
+import type {
+  DocumentNode,
+  InitialIncrementalExecutionResult,
+  SubsequentIncrementalExecutionResult,
+} from 'graphql';
 import { buildSchema, parse } from 'graphql';
 import { describe, it } from 'mocha';
 
@@ -7,11 +11,6 @@ import { expectJSON } from '../../__testUtils__/expectJSON.js';
 import { resolveOnNextTick } from '../../__testUtils__/resolveOnNextTick.js';
 
 import { invariant } from '../../jsutils/invariant.js';
-
-import type {
-  LegacyInitialIncrementalExecutionResult,
-  LegacySubsequentIncrementalExecutionResult,
-} from '../PayloadPublisher.js';
 
 import { execute } from './execute.js';
 
@@ -29,8 +28,7 @@ async function complete(
 
   if ('initialResult' in result) {
     const results: Array<
-      | LegacyInitialIncrementalExecutionResult
-      | LegacySubsequentIncrementalExecutionResult
+      InitialIncrementalExecutionResult | SubsequentIncrementalExecutionResult
     > = [result.initialResult];
     for await (const patch of result.subsequentResults) {
       results.push(patch);
@@ -587,6 +585,7 @@ describe('Execute: Cancellation', () => {
     expectJSON(result).toDeepEqual([
       {
         data: {},
+        pending: [{ id: '0', path: [] }],
         hasNext: true,
       },
       {
@@ -602,9 +601,10 @@ describe('Execute: Cancellation', () => {
                 locations: [{ line: 4, column: 11 }],
               },
             ],
-            path: [],
+            id: '0',
           },
         ],
+        completed: [{ id: '0' }],
         hasNext: false,
       },
     ]);
@@ -644,6 +644,7 @@ describe('Execute: Cancellation', () => {
             items: [],
           },
         },
+        pending: [{ id: '0', path: ['todo', 'items'] }],
         hasNext: true,
       },
       {
@@ -657,9 +658,10 @@ describe('Execute: Cancellation', () => {
                 locations: [{ line: 5, column: 11 }],
               },
             ],
-            path: ['todo', 'items', 0],
+            id: '0',
           },
         ],
+        completed: [{ id: '0' }],
         hasNext: false,
       },
     ]);
@@ -699,6 +701,7 @@ describe('Execute: Cancellation', () => {
             items: [],
           },
         },
+        pending: [{ id: '0', path: ['todo', 'items'] }],
         hasNext: true,
       },
       {
@@ -712,9 +715,10 @@ describe('Execute: Cancellation', () => {
                 locations: [{ line: 5, column: 11 }],
               },
             ],
-            path: ['todo', 'items', 0],
+            id: '0',
           },
         ],
+        completed: [{ id: '0' }],
         hasNext: false,
       },
     ]);

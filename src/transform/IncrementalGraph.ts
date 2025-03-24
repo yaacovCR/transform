@@ -1,13 +1,21 @@
+import type { GraphQLError } from 'graphql';
+
+import { BoxedPromiseOrValue } from '../jsutils/BoxedPromiseOrValue.js';
 import { invariant } from '../jsutils/invariant.js';
+import { isPromise } from '../jsutils/isPromise.js';
+import { promiseWithResolvers } from '../jsutils/promiseWithResolvers.js';
 
 import type {
   DeferredFragment,
   ExecutionGroupResult,
   IncrementalDataRecord,
+  IncrementalGraphEvent,
+  PendingExecutionGroup,
   Stream,
+  StreamItem,
   SubsequentResultRecord,
-} from './buildTransformationContext.js';
-import { isStream } from './buildTransformationContext.js';
+} from './types.js';
+import { isStream } from './types.js';
 
 /**
  * @internal
@@ -15,12 +23,18 @@ import { isStream } from './buildTransformationContext.js';
 export class IncrementalGraph {
   private _streamNodes: Map<string, Set<Stream>>;
   private _deferredFragmentNodes: Map<string, DeferredFragment>;
-  private _newRootNodes: Array<SubsequentResultRecord>;
+  private _pending: Set<IncrementalDataRecord>;
+  private _completedQueue: Array<IncrementalGraphEvent>;
+  private _nextQueue: Array<
+    (iterable: Iterable<IncrementalGraphEvent> | undefined) => void
+  >;
 
   constructor() {
     this._streamNodes = new Map();
     this._deferredFragmentNodes = new Map();
-    this._newRootNodes = Array<SubsequentResultRecord>();
+    this._pending = new Set();
+    this._completedQueue = [];
+    this._nextQueue = [];
   }
 
   getStreams(pathStr: string): Set<Stream> | undefined {
@@ -31,55 +45,134 @@ export class IncrementalGraph {
     return this._deferredFragmentNodes.get(key);
   }
 
-  addIncrementalDataRecords(
+  getNewRootNodes(
     incrementalDataRecords: ReadonlyArray<IncrementalDataRecord>,
-  ): void {
-    const initialResultChildren: Array<SubsequentResultRecord> = [];
+  ): ReadonlyArray<SubsequentResultRecord> {
+    const initialResultChildren = new Set<SubsequentResultRecord>();
     this._addIncrementalDataRecords(
       incrementalDataRecords,
       undefined,
       initialResultChildren,
     );
-    this._promoteNonEmptyToRoot(initialResultChildren);
+    return this._promoteNonEmptyToRoot(initialResultChildren);
   }
 
-  *getNewRootNodes(): Generator<SubsequentResultRecord> {
-    let newRootNode;
-    while ((newRootNode = this._newRootNodes.shift()) !== undefined) {
-      yield newRootNode;
+  addCompletedSuccessfulExecutionGroup(
+    executionGroupResult: ExecutionGroupResult,
+  ): void {
+    const { pendingExecutionGroup, incrementalDataRecords } =
+      executionGroupResult;
+
+    const deferredFragments = pendingExecutionGroup.deferredFragments;
+
+    for (const deferredFragment of deferredFragments) {
+      const { pendingExecutionGroups, successfulExecutionGroups } =
+        deferredFragment;
+      pendingExecutionGroups.delete(pendingExecutionGroup);
+      successfulExecutionGroups.add(executionGroupResult);
     }
+
+    this._addIncrementalDataRecords(incrementalDataRecords, deferredFragments);
+  }
+
+  *currentCompletedBatch(): Generator<IncrementalGraphEvent> {
+    let completed;
+    while ((completed = this._completedQueue.shift()) !== undefined) {
+      yield completed;
+    }
+    // TODO: fix coverage?
+    /* c8 ignore next 5 */
+    if (!this.hasNext()) {
+      for (const resolve of this._nextQueue) {
+        resolve(undefined);
+      }
+    }
+  }
+
+  // TODO: add test cases for async transformations of incremental results
+  /* c8 ignore next 9 */
+  nextCompletedBatch(): Promise<Iterable<IncrementalGraphEvent> | undefined> {
+    const { promise, resolve } = promiseWithResolvers<
+      Iterable<IncrementalGraphEvent> | undefined
+    >();
+    this._nextQueue.push(resolve);
+    return promise;
+  }
+
+  hasPending(): boolean {
+    return this._pending.size > 0;
   }
 
   hasNext(): boolean {
     return this._streamNodes.size > 0 || this._deferredFragmentNodes.size > 0;
   }
 
-  completeDeferredFragment(
-    deferredFragment: DeferredFragment,
-  ): ReadonlyArray<ExecutionGroupResult> | undefined {
-    if (!this._deferredFragmentNodes.has(deferredFragment.key)) {
+  completeDeferredFragment(deferredFragment: DeferredFragment):
+    | {
+        newRootNodes: ReadonlyArray<SubsequentResultRecord>;
+        successfulExecutionGroups: ReadonlyArray<ExecutionGroupResult>;
+      }
+    | undefined {
+    // TODO: add test cases for async deferred fragment transformation
+    /* c8 ignore next 6 */
+    if (
+      !this._deferredFragmentNodes.has(deferredFragment.key) ||
+      deferredFragment.pendingExecutionGroups.size > 0
+    ) {
       return;
     }
-    const executionGroupResults: Array<ExecutionGroupResult> = [];
-    for (const pendingExecutionGroup of deferredFragment.pendingExecutionGroups) {
-      const executionGroupResult = pendingExecutionGroup.result();
-      executionGroupResults.push(executionGroupResult);
-      this._addIncrementalDataRecords(
-        executionGroupResult.incrementalDataRecords,
-        executionGroupResult.pendingExecutionGroup.deferredFragments,
-      );
-    }
+    const successfulExecutionGroups = Array.from(
+      deferredFragment.successfulExecutionGroups,
+    );
     this._deferredFragmentNodes.delete(deferredFragment.key);
-    for (const executionGroupResult of executionGroupResults) {
-      const pendingExecutionGroup = executionGroupResult.pendingExecutionGroup;
-      for (const otherDeferredFragment of pendingExecutionGroup.deferredFragments) {
-        otherDeferredFragment.pendingExecutionGroups.delete(
-          pendingExecutionGroup,
+    for (const successfulExecutionGroup of successfulExecutionGroups) {
+      for (const otherDeferredFragmentRecord of successfulExecutionGroup
+        .pendingExecutionGroup.deferredFragments) {
+        otherDeferredFragmentRecord.successfulExecutionGroups.delete(
+          successfulExecutionGroup,
         );
       }
     }
-    this._promoteNonEmptyToRoot(deferredFragment.children);
-    return executionGroupResults;
+    const newRootNodes = this._promoteNonEmptyToRoot(deferredFragment.children);
+    return { newRootNodes, successfulExecutionGroups };
+  }
+
+  onCompletedOriginalDeferredFragment(
+    deferredFragment: DeferredFragment,
+    errors: ReadonlyArray<GraphQLError> | undefined,
+  ): void {
+    deferredFragment.ready = true;
+    if (errors === undefined) {
+      const pendingExecutionGroups = deferredFragment.pendingExecutionGroups;
+      for (const pendingExecutionGroup of pendingExecutionGroups) {
+        this._onExecutionGroup(pendingExecutionGroup);
+      }
+    } else {
+      deferredFragment.ready = errors;
+      this._enqueue({ deferredFragment, errors });
+    }
+  }
+  completeStreamItems(stream: Stream): void {
+    const { list, nextExecutionIndex } = stream;
+    const numItems = list.length;
+    for (let i = nextExecutionIndex; i < numItems; i++) {
+      const streamItem = { stream, result: () => stream.result(i) };
+      stream.streamItemQueue.push(streamItem);
+    }
+    stream.nextExecutionIndex = numItems;
+
+    // eslint-disable-next-line @typescript-eslint/no-floating-promises
+    this._onStreamItems(stream);
+  }
+
+  terminateStream(
+    stream: Stream,
+    result: ReadonlyArray<GraphQLError> | null,
+  ): void {
+    stream.streamItemQueue.push({ stream, result });
+
+    // eslint-disable-next-line @typescript-eslint/no-floating-promises
+    this._onStreamItems(stream);
   }
 
   removeDeferredFragment(deferredFragment: DeferredFragment): void {
@@ -98,38 +191,62 @@ export class IncrementalGraph {
   private _addIncrementalDataRecords(
     incrementalDataRecords: ReadonlyArray<IncrementalDataRecord>,
     parents: ReadonlyArray<DeferredFragment> | undefined,
-    initialResultChildren?: Array<SubsequentResultRecord>,
+    initialResultChildren?: Set<SubsequentResultRecord>,
   ): void {
     for (const incrementalDataRecord of incrementalDataRecords) {
       if (!isStream(incrementalDataRecord)) {
+        let ready = false;
         for (const deferredFragment of incrementalDataRecord.deferredFragments) {
           this._addDeferredFragment(deferredFragment, initialResultChildren);
           deferredFragment.pendingExecutionGroups.add(incrementalDataRecord);
+          if (deferredFragment.ready === true) {
+            ready = true;
+          }
+        }
+        if (ready && this._completesRootNode(incrementalDataRecord)) {
+          this._onExecutionGroup(incrementalDataRecord);
         }
       } else if (parents === undefined) {
         invariant(initialResultChildren !== undefined);
-        initialResultChildren.push(incrementalDataRecord);
+        initialResultChildren.add(incrementalDataRecord);
       } else {
         for (const parent of parents) {
           this._addDeferredFragment(parent, initialResultChildren);
-          parent.children.push(incrementalDataRecord);
+          parent.children.add(incrementalDataRecord);
         }
       }
     }
   }
 
   private _promoteNonEmptyToRoot(
-    maybeEmptyNewRootNodes: Array<SubsequentResultRecord>,
-  ): void {
+    maybeEmptyNewRootNodes: Set<SubsequentResultRecord>,
+  ): ReadonlyArray<SubsequentResultRecord> {
+    const newRootNodes: Array<SubsequentResultRecord> = [];
     for (const node of maybeEmptyNewRootNodes) {
       if (!isStream(node)) {
         if (node.pendingExecutionGroups.size > 0) {
+          // TODO: add test cases for executor returning results early
+          /* c8 ignore start */
+          const ready = node.ready;
+          if (ready === true) {
+            for (const pendingExecutionGroup of node.pendingExecutionGroups) {
+              if (!this._completesRootNode(pendingExecutionGroup)) {
+                this._onExecutionGroup(pendingExecutionGroup);
+              }
+            }
+          } else if (Array.isArray(ready)) {
+            this._enqueue({
+              deferredFragment: node,
+              errors: ready,
+            });
+          }
+          /* c8 ignore stop */
           this._deferredFragmentNodes.set(node.key, node);
-          this._newRootNodes.push(node);
+          newRootNodes.push(node);
           continue;
         }
         for (const child of node.children) {
-          maybeEmptyNewRootNodes.push(child);
+          maybeEmptyNewRootNodes.add(child);
         }
       } else {
         let streamNodes = this._streamNodes.get(node.pathStr);
@@ -138,25 +255,176 @@ export class IncrementalGraph {
           this._streamNodes.set(node.pathStr, streamNodes);
         }
         streamNodes.add(node);
-        this._newRootNodes.push(node);
+        newRootNodes.push(node);
       }
     }
+    return newRootNodes;
+  }
+
+  private _completesRootNode(
+    pendingExecutionGroup: PendingExecutionGroup,
+  ): boolean {
+    return pendingExecutionGroup.deferredFragments.some((deferredFragment) =>
+      this._deferredFragmentNodes.has(deferredFragment.key),
+    );
   }
 
   private _addDeferredFragment(
     deferredFragment: DeferredFragment,
-    initialResultChildren: Array<SubsequentResultRecord> | undefined,
+    initialResultChildren: Set<SubsequentResultRecord> | undefined,
   ): void {
-    if (this._deferredFragmentNodes.has(deferredFragment.key)) {
+    if (
+      deferredFragment.failed ||
+      this._deferredFragmentNodes.has(deferredFragment.key)
+    ) {
       return;
     }
     const parent = deferredFragment.parent;
     if (parent === undefined) {
       invariant(initialResultChildren !== undefined);
-      initialResultChildren.push(deferredFragment);
+      initialResultChildren.add(deferredFragment);
       return;
     }
-    parent.children.push(deferredFragment);
+    parent.children.add(deferredFragment);
     this._addDeferredFragment(parent, initialResultChildren);
   }
+
+  private _onExecutionGroup(
+    pendingExecutionGroup: PendingExecutionGroup,
+  ): void {
+    let result = pendingExecutionGroup.result;
+    if (result instanceof BoxedPromiseOrValue) {
+      return;
+    }
+
+    pendingExecutionGroup.result = result = result();
+    const value = result.value;
+    // TODO: add test cases for async transformation of execution group results
+    /* c8 ignore next 11 */
+    if (isPromise(value)) {
+      this._pending.add(pendingExecutionGroup);
+      value.then(
+        (resolved) => {
+          this._pending.delete(pendingExecutionGroup);
+          this._enqueue(resolved);
+        },
+        () => {
+          /* ignore errors */
+        },
+      );
+    } else {
+      this._enqueue(value);
+    }
+  }
+
+  private async _onStreamItems(stream: Stream): Promise<void> {
+    // TODO: add test case for concurrent calls
+    /* c8 ignore next 3 */
+    if (stream.pending) {
+      return;
+    }
+    stream.pending = true;
+
+    let items: Array<unknown> = [];
+    let errors: Array<GraphQLError> = [];
+    let incrementalDataRecords: Array<IncrementalDataRecord> = [];
+
+    const streamItemQueue = stream.streamItemQueue;
+    let streamItem: StreamItem | undefined;
+    while ((streamItem = streamItemQueue.shift()) !== undefined) {
+      const result =
+        typeof streamItem.result === 'function'
+          ? streamItem.result()
+          : streamItem.result;
+      if (!(result instanceof BoxedPromiseOrValue)) {
+        // TODO: fix coverage, add test case for completed items prior to stream termination
+        /* c8 ignore next 6 */
+        if (items.length > 0) {
+          this._enqueue({
+            stream,
+            result: { items, errors, incrementalDataRecords },
+          });
+        }
+        this._enqueue(
+          result === null
+            ? { stream }
+            : {
+                stream,
+                errors: result,
+              },
+        );
+        return;
+      }
+
+      let value = result.value;
+      // TODO: add test cases for async transformation of stream items
+      /* c8 ignore next 23 */
+      if (isPromise(value)) {
+        this._pending.add(stream);
+        if (items.length > 0) {
+          this._enqueue({
+            stream,
+            result: {
+              items,
+              errors,
+              incrementalDataRecords,
+            },
+          });
+          items = [];
+          errors = [];
+          incrementalDataRecords = [];
+        }
+        // eslint-disable-next-line no-await-in-loop
+        value = await value;
+        this._pending.delete(stream);
+        // wait an additional tick to coalesce resolving additional promises
+        // within the queue
+        // eslint-disable-next-line no-await-in-loop
+        await Promise.resolve();
+      }
+      const item = value.item;
+      if (item === undefined) {
+        // TODO: add test case for failure via transformation with existing items
+        /* c8 ignore start */
+        if (items.length > 0) {
+          this._enqueue({
+            stream,
+            result: {
+              items,
+              errors,
+              incrementalDataRecords,
+            },
+          });
+        }
+        /* c8 ignore stop */
+        this._enqueue({
+          stream,
+          errors: value.errors,
+        });
+        return;
+      }
+      items.push(item);
+      errors.push(...value.errors);
+      incrementalDataRecords.push(...value.incrementalDataRecords);
+    }
+
+    if (items.length > 0) {
+      this._enqueue({
+        stream,
+        result: { items, errors, incrementalDataRecords },
+      });
+    }
+
+    stream.pending = false;
+  }
+
+  private _enqueue(completed: IncrementalGraphEvent): void {
+    this._completedQueue.push(completed);
+    const next = this._nextQueue.shift();
+    if (next === undefined) {
+      return; /* c8 ignore start */
+    }
+    // TODO: fix coverage
+    next(this.currentCompletedBatch());
+  } /* c8 ignore stop */
 }
