@@ -45,7 +45,7 @@ const schema = new GraphQLSchema({
 async function complete(
   document: DocumentNode,
   rootValue: ObjMap<unknown>,
-  transformers?: Partial<Transformers>,
+  transformers?: Transformers,
 ) {
   const result = transformResult(
     {

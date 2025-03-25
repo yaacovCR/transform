@@ -34,8 +34,8 @@ type LeafTransformer = (
 type LeafTransformers = ObjMap<LeafTransformer>;
 
 export interface Transformers {
-  objectFieldTransformers: ObjectFieldTransformers;
-  leafTransformers: LeafTransformers;
+  objectFieldTransformers?: ObjectFieldTransformers;
+  leafTransformers?: LeafTransformers;
 }
 
 export interface TransformationContext {
@@ -58,7 +58,7 @@ export function buildTransformationContext(
     originalArgs,
   );
 
-  const { objectFieldTransformers, leafTransformers } = transformers;
+  const { objectFieldTransformers = {}, leafTransformers = {} } = transformers;
 
   return {
     argsWithNewLabels,
