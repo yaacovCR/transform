@@ -24,14 +24,38 @@ pnpm add @yaacovCR/transform graphql@17.0.0-alpha.8
 
 This library offers:
 
-- Configurable leaf transformers for modifying GraphQL results.
+- Configurable object field and leaf value transformers for modifying GraphQL results.
 - Mapping from the latest incremental delivery format to the legacy format.
 
 ## Usage
 
+### Configurable Object Field Transformers
+
+Pass `objectFieldTransformers` in a `Transformers` object to `transformResult()`.
+
+```ts
+import { transformResult } from '@yaacovCR/transform';
+
+const originalResult = await experimentalExecuteIncrementally({
+  schema,
+  document,
+  rootValue,
+  contextValue,
+  variableValues,
+});
+
+const transformed = await transformResult(originalResult, {
+  objectFieldTransformers: {
+    SomeType: {
+      someField: (value, _someFieldDef) => 'transformed',
+    },
+  },
+});
+```
+
 ### Configurable Leaf Transformers
 
-Pass leafTransformers in a Transformers object to `transformResult()`.
+Pass `leafTransformers` in a `Transformers` object to `transformResult()`.
 
 ```ts
 import { transformResult } from '@yaacovCR/transform';
@@ -46,7 +70,7 @@ const originalResult = await experimentalExecuteIncrementally({
 
 const transformed = await transformResult(originalResult, {
   leafTransformers: {
-    Color: (value) => (value === 'GREEN' ? 'DARK_GREEN' : value),
+    Color: (value, _colorType) => (value === 'GREEN' ? 'DARK_GREEN' : value),
   },
 });
 ```
