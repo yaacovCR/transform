@@ -1,5 +1,12 @@
 # @yaacovcr/transform
 
+## 0.0.4
+
+### Patch Changes
+
+- 17ddd66: Add ability to transform field values
+- 17ddd66: Switch graphql to peer dependency
+
 ## 0.0.3
 
 ### Patch Changes
