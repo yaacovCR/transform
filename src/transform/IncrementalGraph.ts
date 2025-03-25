@@ -89,8 +89,6 @@ export class IncrementalGraph {
     }
   }
 
-  // TODO: add test cases for async transformations of incremental results
-  /* c8 ignore next 9 */
   nextCompletedBatch(): Promise<Iterable<IncrementalGraphEvent> | undefined> {
     const { promise, resolve } = promiseWithResolvers<
       Iterable<IncrementalGraphEvent> | undefined
@@ -113,8 +111,6 @@ export class IncrementalGraph {
         successfulExecutionGroups: ReadonlyArray<ExecutionGroupResult>;
       }
     | undefined {
-    // TODO: add test cases for async deferred fragment transformation
-    /* c8 ignore next 6 */
     if (
       !this._deferredFragmentNodes.has(deferredFragment.key) ||
       deferredFragment.pendingExecutionGroups.size > 0
@@ -299,27 +295,19 @@ export class IncrementalGraph {
 
     pendingExecutionGroup.result = result = result();
     const value = result.value;
-    // TODO: add test cases for async transformation of execution group results
-    /* c8 ignore next 11 */
     if (isPromise(value)) {
       this._pending.add(pendingExecutionGroup);
-      value.then(
-        (resolved) => {
-          this._pending.delete(pendingExecutionGroup);
-          this._enqueue(resolved);
-        },
-        () => {
-          /* ignore errors */
-        },
-      );
+      // eslint-disable-next-line @typescript-eslint/no-floating-promises
+      value.then((resolved) => {
+        this._pending.delete(pendingExecutionGroup);
+        this._enqueue(resolved);
+      });
     } else {
       this._enqueue(value);
     }
   }
 
   private async _onStreamItems(stream: Stream): Promise<void> {
-    // TODO: add test case for concurrent calls
-    /* c8 ignore next 3 */
     if (stream.pending) {
       return;
     }
@@ -337,8 +325,6 @@ export class IncrementalGraph {
           ? streamItem.result()
           : streamItem.result;
       if (!(result instanceof BoxedPromiseOrValue)) {
-        // TODO: fix coverage, add test case for completed items prior to stream termination
-        /* c8 ignore next 6 */
         if (items.length > 0) {
           this._enqueue({
             stream,
@@ -357,8 +343,6 @@ export class IncrementalGraph {
       }
 
       let value = result.value;
-      // TODO: add test cases for async transformation of stream items
-      /* c8 ignore next 23 */
       if (isPromise(value)) {
         this._pending.add(stream);
         if (items.length > 0) {
@@ -422,9 +406,8 @@ export class IncrementalGraph {
     this._completedQueue.push(completed);
     const next = this._nextQueue.shift();
     if (next === undefined) {
-      return; /* c8 ignore start */
+      return;
     }
-    // TODO: fix coverage
     next(this.currentCompletedBatch());
-  } /* c8 ignore stop */
+  }
 }

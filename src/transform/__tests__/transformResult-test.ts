@@ -45,7 +45,7 @@ const schema = new GraphQLSchema({
 async function complete(
   document: DocumentNode,
   rootValue: ObjMap<unknown>,
-  transformers?: Transformers,
+  transformers?: Partial<Transformers>,
 ) {
   const result = transformResult(
     {
@@ -250,8 +250,8 @@ describe('transformResult', () => {
     });
   });
 
-  describe('handles synchronously transformed values', () => {
-    describe('handles transformed values', () => {
+  describe('handles synchronously transformed field values', () => {
+    describe('handles transformed field values', () => {
       it('handles transformation', () => {
         const result = transformResult(
           {
@@ -259,11 +259,643 @@ describe('transformResult', () => {
             document: parse('{ someField }'),
             rootValue: { someField: 'someField' },
           },
-          { leafTransformers: { String: () => 'transformedField' } },
+          {
+            objectFieldTransformers: {
+              Query: { someField: () => 'transformed' },
+            },
+          },
         );
 
         expectJSON(result).toDeepEqual({
-          data: { someField: 'transformedField' },
+          data: { someField: 'transformed' },
+        });
+      });
+
+      it('handles transformation returning null', () => {
+        const result = transformResult(
+          {
+            schema,
+            document: parse('{ someField }'),
+            rootValue: { someField: 'someField' },
+          },
+          {
+            objectFieldTransformers: {
+              Query: { someField: () => null },
+            },
+          },
+        );
+
+        expectJSON(result).toDeepEqual({ data: { someField: null } });
+      });
+
+      it('handles transformation throwing an error', () => {
+        const result = transformResult(
+          {
+            schema,
+            document: parse('{ someField }'),
+            rootValue: { someField: 'someField' },
+          },
+          {
+            objectFieldTransformers: {
+              Query: {
+                someField: () => {
+                  throw new Error('Oops');
+                },
+              },
+            },
+          },
+        );
+
+        expectJSON(result).toDeepEqual({
+          data: { someField: null },
+          errors: [
+            {
+              message: 'Oops',
+              path: ['someField'],
+              locations: [{ line: 1, column: 3 }],
+            },
+          ],
+        });
+      });
+
+      it('handles transformation returning an error', () => {
+        const result = transformResult(
+          {
+            schema,
+            document: parse('{ someField }'),
+            rootValue: { someField: 'someField' },
+          },
+          {
+            objectFieldTransformers: {
+              Query: {
+                someField: () => new Error('Oops'),
+              },
+            },
+          },
+        );
+
+        expectJSON(result).toDeepEqual({
+          data: { someField: null },
+          errors: [
+            {
+              message: 'Oops',
+              path: ['someField'],
+              locations: [{ line: 1, column: 3 }],
+            },
+          ],
+        });
+      });
+    });
+
+    describe('handles transformed non-nullable field values', () => {
+      it('handles transformation', () => {
+        const result = transformResult(
+          {
+            schema,
+            document: parse('{ nonNullableField }'),
+            rootValue: { nonNullableField: 'nonNullableField' },
+          },
+          {
+            objectFieldTransformers: {
+              Query: {
+                nonNullableField: () => 'transformed',
+              },
+            },
+          },
+        );
+
+        expectJSON(result).toDeepEqual({
+          data: { nonNullableField: 'transformed' },
+        });
+      });
+
+      it('handles transformation returning null', () => {
+        const result = transformResult(
+          {
+            schema,
+            document: parse('{ nonNullableField }'),
+            rootValue: { nonNullableField: 'nonNullableField' },
+          },
+          {
+            objectFieldTransformers: {
+              Query: {
+                nonNullableField: () => null,
+              },
+            },
+          },
+        );
+
+        expectJSON(result).toDeepEqual({
+          data: null,
+          errors: [
+            {
+              message:
+                'Cannot return null for non-nullable field Query.nonNullableField.',
+              path: ['nonNullableField'],
+              locations: [{ line: 1, column: 3 }],
+            },
+          ],
+        });
+      });
+
+      it('handles transformation throwing an error', () => {
+        const result = transformResult(
+          {
+            schema,
+            document: parse('{ nonNullableField }'),
+            rootValue: { nonNullableField: 'nonNullableField' },
+          },
+          {
+            objectFieldTransformers: {
+              Query: {
+                nonNullableField: () => {
+                  throw new Error('Oops');
+                },
+              },
+            },
+          },
+        );
+
+        expectJSON(result).toDeepEqual({
+          data: null,
+          errors: [
+            {
+              message: 'Oops',
+              path: ['nonNullableField'],
+              locations: [{ line: 1, column: 3 }],
+            },
+          ],
+        });
+      });
+
+      it('handles transformation returning an error', () => {
+        const result = transformResult(
+          {
+            schema,
+            document: parse('{ nonNullableField }'),
+            rootValue: { nonNullableField: 'nonNullableField' },
+          },
+          {
+            objectFieldTransformers: {
+              Query: {
+                nonNullableField: () => new Error('Oops'),
+              },
+            },
+          },
+        );
+
+        expectJSON(result).toDeepEqual({
+          data: null,
+          errors: [
+            {
+              message: 'Oops',
+              path: ['nonNullableField'],
+              locations: [{ line: 1, column: 3 }],
+            },
+          ],
+        });
+      });
+    });
+
+    describe('handles transformations of deferred fragments', () => {
+      it('handles transformation within a deferred payload', async () => {
+        const document = parse(`
+          query {
+            someObjectField {
+              ... @defer { someField }
+            }
+          }
+        `);
+        const result = await complete(
+          document,
+          {
+            someObjectField: {
+              someField: 'someField',
+            },
+          },
+          {
+            objectFieldTransformers: {
+              Query: {
+                someField: () => 'transformed',
+              },
+            },
+          },
+        );
+        expectJSON(result).toDeepEqual([
+          {
+            data: { someObjectField: {} },
+            pending: [{ id: '0', path: ['someObjectField'] }],
+            hasNext: true,
+          },
+          {
+            incremental: [
+              {
+                data: { someField: 'transformed' },
+                id: '0',
+              },
+            ],
+            completed: [{ id: '0' }],
+            hasNext: false,
+          },
+        ]);
+      });
+
+      it('handles transformation within a deferred payload causing the fragment to fail', async () => {
+        const document = parse(`
+          query {
+            someObjectField {
+              ... @defer { nonNullableField }
+            }
+          }
+        `);
+        const result = await complete(
+          document,
+          {
+            someObjectField: {
+              nonNullableField: 'nonNullableField',
+            },
+          },
+          {
+            objectFieldTransformers: {
+              Query: {
+                nonNullableField: () => null,
+              },
+            },
+          },
+        );
+        expectJSON(result).toDeepEqual([
+          {
+            data: { someObjectField: {} },
+            pending: [{ id: '0', path: ['someObjectField'] }],
+            hasNext: true,
+          },
+          {
+            completed: [
+              {
+                id: '0',
+                errors: [
+                  {
+                    message:
+                      'Cannot return null for non-nullable field Query.nonNullableField.',
+                    path: ['someObjectField', 'nonNullableField'],
+                    locations: [{ line: 4, column: 28 }],
+                  },
+                ],
+              },
+            ],
+            hasNext: false,
+          },
+        ]);
+      });
+    });
+  });
+
+  describe('handles asynchronously transformed field values', () => {
+    describe('handles transformed field values', () => {
+      it('handles transformation', async () => {
+        let result = transformResult(
+          {
+            schema,
+            document: parse('{ someField }'),
+            rootValue: { someField: 'someField' },
+          },
+          {
+            objectFieldTransformers: {
+              Query: {
+                someField: () => Promise.resolve('transformed'),
+              },
+            },
+          },
+        );
+
+        assert(isPromise(result));
+
+        result = await result;
+
+        expectJSON(result).toDeepEqual({
+          data: { someField: 'transformed' },
+        });
+      });
+
+      it('handles transformation returning null', async () => {
+        let result = transformResult(
+          {
+            schema,
+            document: parse('{ someField }'),
+            rootValue: { someField: 'someField' },
+          },
+          {
+            objectFieldTransformers: {
+              Query: {
+                someField: () => Promise.resolve(null),
+              },
+            },
+          },
+        );
+
+        assert(isPromise(result));
+
+        result = await result;
+
+        expectJSON(result).toDeepEqual({ data: { someField: null } });
+      });
+
+      it('handles transformation throwing an error', async () => {
+        let result = transformResult(
+          {
+            schema,
+            document: parse('{ someField }'),
+            rootValue: { someField: 'someField' },
+          },
+          {
+            objectFieldTransformers: {
+              Query: {
+                someField: () => Promise.reject(new Error('Oops')),
+              },
+            },
+          },
+        );
+
+        assert(isPromise(result));
+
+        result = await result;
+
+        expectJSON(result).toDeepEqual({
+          data: { someField: null },
+          errors: [
+            {
+              message: 'Oops',
+              path: ['someField'],
+              locations: [{ line: 1, column: 3 }],
+            },
+          ],
+        });
+      });
+
+      it('handles transformation returning an error', async () => {
+        let result = transformResult(
+          {
+            schema,
+            document: parse('{ someField }'),
+            rootValue: { someField: 'someField' },
+          },
+          {
+            objectFieldTransformers: {
+              Query: {
+                someField: () => Promise.resolve(new Error('Oops')),
+              },
+            },
+          },
+        );
+
+        assert(isPromise(result));
+
+        result = await result;
+
+        expectJSON(result).toDeepEqual({
+          data: { someField: null },
+          errors: [
+            {
+              message: 'Oops',
+              path: ['someField'],
+              locations: [{ line: 1, column: 3 }],
+            },
+          ],
+        });
+      });
+    });
+
+    describe('handles transformed non-nullable field values', () => {
+      it('handles transformation', async () => {
+        let result = transformResult(
+          {
+            schema,
+            document: parse('{ nonNullableField }'),
+            rootValue: { nonNullableField: 'nonNullableField' },
+          },
+          {
+            objectFieldTransformers: {
+              Query: {
+                nonNullableField: () => Promise.resolve('transformed'),
+              },
+            },
+          },
+        );
+
+        assert(isPromise(result));
+
+        result = await result;
+
+        expectJSON(result).toDeepEqual({
+          data: { nonNullableField: 'transformed' },
+        });
+      });
+
+      it('handles transformation returning null', async () => {
+        let result = transformResult(
+          {
+            schema,
+            document: parse('{ nonNullableField }'),
+            rootValue: { nonNullableField: 'nonNullableField' },
+          },
+          {
+            objectFieldTransformers: {
+              Query: {
+                nonNullableField: () => Promise.resolve(null),
+              },
+            },
+          },
+        );
+
+        assert(isPromise(result));
+
+        result = await result;
+
+        expectJSON(result).toDeepEqual({
+          data: null,
+          errors: [
+            {
+              message:
+                'Cannot return null for non-nullable field Query.nonNullableField.',
+              path: ['nonNullableField'],
+              locations: [{ line: 1, column: 3 }],
+            },
+          ],
+        });
+      });
+
+      it('handles transformation throwing an error', async () => {
+        let result = transformResult(
+          {
+            schema,
+            document: parse('{ nonNullableField }'),
+            rootValue: { nonNullableField: 'nonNullableField' },
+          },
+          {
+            objectFieldTransformers: {
+              Query: {
+                nonNullableField: () => Promise.reject(new Error('Oops')),
+              },
+            },
+          },
+        );
+
+        assert(isPromise(result));
+
+        result = await result;
+
+        expectJSON(result).toDeepEqual({
+          data: null,
+          errors: [
+            {
+              message: 'Oops',
+              path: ['nonNullableField'],
+              locations: [{ line: 1, column: 3 }],
+            },
+          ],
+        });
+      });
+
+      it('handles transformation returning an error', async () => {
+        let result = transformResult(
+          {
+            schema,
+            document: parse('{ nonNullableField }'),
+            rootValue: { nonNullableField: 'nonNullableField' },
+          },
+          {
+            objectFieldTransformers: {
+              Query: {
+                nonNullableField: () => Promise.resolve(new Error('Oops')),
+              },
+            },
+          },
+        );
+
+        assert(isPromise(result));
+
+        result = await result;
+
+        expectJSON(result).toDeepEqual({
+          data: null,
+          errors: [
+            {
+              message: 'Oops',
+              path: ['nonNullableField'],
+              locations: [{ line: 1, column: 3 }],
+            },
+          ],
+        });
+      });
+    });
+
+    describe('handles transformations of deferred fragments', () => {
+      it('handles transformation within a deferred payload', async () => {
+        const document = parse(`
+          query {
+            someObjectField {
+              ... @defer { someField }
+            }
+          }
+        `);
+        const result = await complete(
+          document,
+          {
+            someObjectField: {
+              someField: 'someField',
+            },
+          },
+          {
+            objectFieldTransformers: {
+              Query: {
+                someField: () => Promise.resolve('transformed'),
+              },
+            },
+          },
+        );
+        expectJSON(result).toDeepEqual([
+          {
+            data: { someObjectField: {} },
+            pending: [{ id: '0', path: ['someObjectField'] }],
+            hasNext: true,
+          },
+          {
+            incremental: [
+              {
+                data: { someField: 'transformed' },
+                id: '0',
+              },
+            ],
+            completed: [{ id: '0' }],
+            hasNext: false,
+          },
+        ]);
+      });
+
+      it('handles transformation within a deferred payload causing the fragment to fail', async () => {
+        const document = parse(`
+          query {
+            someObjectField {
+              ... @defer { nonNullableField }
+            }
+          }
+        `);
+        const result = await complete(
+          document,
+          {
+            someObjectField: {
+              nonNullableField: 'nonNullableField',
+            },
+          },
+          {
+            objectFieldTransformers: {
+              Query: {
+                nonNullableField: () => Promise.resolve(null),
+              },
+            },
+          },
+        );
+        expectJSON(result).toDeepEqual([
+          {
+            data: { someObjectField: {} },
+            pending: [{ id: '0', path: ['someObjectField'] }],
+            hasNext: true,
+          },
+          {
+            completed: [
+              {
+                id: '0',
+                errors: [
+                  {
+                    message:
+                      'Cannot return null for non-nullable field Query.nonNullableField.',
+                    path: ['someObjectField', 'nonNullableField'],
+                    locations: [{ line: 4, column: 28 }],
+                  },
+                ],
+              },
+            ],
+            hasNext: false,
+          },
+        ]);
+      });
+    });
+  });
+
+  describe('handles synchronously transformed leaf values', () => {
+    describe('handles transformed leaf values', () => {
+      it('handles transformation', () => {
+        const result = transformResult(
+          {
+            schema,
+            document: parse('{ someField }'),
+            rootValue: { someField: 'someField' },
+          },
+          { leafTransformers: { String: () => 'transformed' } },
+        );
+
+        expectJSON(result).toDeepEqual({
+          data: { someField: 'transformed' },
         });
       });
 
@@ -335,7 +967,7 @@ describe('transformResult', () => {
       });
     });
 
-    describe('handles transformed non-nullable values', () => {
+    describe('handles transformed non-nullable leaf values', () => {
       it('handles transformation', () => {
         const result = transformResult(
           {
@@ -343,11 +975,11 @@ describe('transformResult', () => {
             document: parse('{ nonNullableField }'),
             rootValue: { nonNullableField: 'nonNullableField' },
           },
-          { leafTransformers: { String: () => 'transformedField' } },
+          { leafTransformers: { String: () => 'transformed' } },
         );
 
         expectJSON(result).toDeepEqual({
-          data: { nonNullableField: 'transformedField' },
+          data: { nonNullableField: 'transformed' },
         });
       });
 
@@ -590,8 +1222,8 @@ describe('transformResult', () => {
     });
   });
 
-  describe('handles asynchronously transformed values', () => {
-    describe('handles transformed values', () => {
+  describe('handles asynchronously transformed leaf values', () => {
+    describe('handles transformed leaf values', () => {
       it('handles transformation', async () => {
         let result = transformResult(
           {
@@ -601,7 +1233,7 @@ describe('transformResult', () => {
           },
           {
             leafTransformers: {
-              String: () => Promise.resolve('transformedField'),
+              String: () => Promise.resolve('transformed'),
             },
           },
         );
@@ -611,7 +1243,7 @@ describe('transformResult', () => {
         result = await result;
 
         expectJSON(result).toDeepEqual({
-          data: { someField: 'transformedField' },
+          data: { someField: 'transformed' },
         });
       });
 
@@ -693,7 +1325,7 @@ describe('transformResult', () => {
       });
     });
 
-    describe('handles transformed non-nullable values', () => {
+    describe('handles transformed non-nullable leaf values', () => {
       it('handles transformation', async () => {
         let result = transformResult(
           {
@@ -703,7 +1335,7 @@ describe('transformResult', () => {
           },
           {
             leafTransformers: {
-              String: () => Promise.resolve('transformedField'),
+              String: () => Promise.resolve('transformed'),
             },
           },
         );
@@ -713,7 +1345,7 @@ describe('transformResult', () => {
         result = await result;
 
         expectJSON(result).toDeepEqual({
-          data: { nonNullableField: 'transformedField' },
+          data: { nonNullableField: 'transformed' },
         });
       });
 

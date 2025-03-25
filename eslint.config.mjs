@@ -54,7 +54,7 @@ export default tsConfig(
       'internal-rules/require-to-string-tag': 'off',
 
       //////////////////////////////////////////////////////////////////////////////
-      // `eslint-plugin-n` rule list based on `v17.14.x`
+      // `eslint-plugin-n` rule list based on `v17.16.x`
       //////////////////////////////////////////////////////////////////////////////
 
       // Rules
@@ -223,7 +223,7 @@ export default tsConfig(
       'simple-import-sort/exports': 'off', // TODO: error
 
       //////////////////////////////////////////////////////////////////////////////
-      // ESLint builtin rules list based on `v9.16.x`
+      // ESLint builtin rules list based on `v9.23.x`
       //////////////////////////////////////////////////////////////////////////////
 
       // Possible Errors
@@ -487,7 +487,7 @@ export default tsConfig(
     },
     rules: {
       //////////////////////////////////////////////////////////////////////////
-      // `@typescript-eslint/eslint-plugin` rule list based on `v8.16.x`
+      // `@typescript-eslint/eslint-plugin` rule list based on `v8.28.x`
       //////////////////////////////////////////////////////////////////////////
 
       // Supported Rules
