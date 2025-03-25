@@ -31,23 +31,8 @@
   "engines": {
     "node": "^18.14.0 || >=19.7.0"
   },
-  "scripts": {
-    "test": "npm run lint && npm run check && npm run testonly && npm run prettier:check && npm run check:spelling",
-    "lint": "eslint --cache --max-warnings 0 .",
-    "check": "tsc --pretty",
-    "testonly": "mocha --full-trace src/**/__tests__/**/*-test.ts",
-    "testonly:cover": "c8 npm run testonly",
-    "testonly:watch": "npm run testonly -- --watch",
-    "prettier": "prettier --cache --cache-strategy metadata --write --list-different .",
-    "prettier:check": "prettier --cache --cache-strategy metadata --check .",
-    "check:spelling": "cspell --cache --no-progress \"**/*\"",
-    "build:npm:dual": "node --loader ts-node/esm resources/build-npm-dual.ts",
-    "build:npm:esm-only": "node --loader ts-node/esm resources/build-npm-esm-only.ts",
-    "build:deno": "node --loader ts-node/esm resources/build-deno.ts",
-    "diff:npm": "node --loader ts-node/esm resources/diff-npm-package.ts",
-    "changeset": "changeset add",
-    "changeset:version": "changeset version && npm install --package-lock-only",
-    "changeset:publish": "node --loader ts-node/esm resources/prepare-for-publish.ts && cd publishWorkspaceConfig && changeset publish"
+  "peerDependencies": {
+    "graphql": "^17.0.0-alpha.8"
   },
   "devDependencies": {
     "@changesets/cli": "^2.27.12",
@@ -67,10 +52,25 @@
     "typescript": "5.7.3",
     "typescript-eslint": "^8.17.0"
   },
+  "scripts": {
+    "test": "npm run lint && npm run check && npm run testonly && npm run prettier:check && npm run check:spelling",
+    "lint": "eslint --cache --max-warnings 0 .",
+    "check": "tsc --pretty",
+    "testonly": "mocha --full-trace src/**/__tests__/**/*-test.ts",
+    "testonly:cover": "c8 npm run testonly",
+    "testonly:watch": "npm run testonly -- --watch",
+    "prettier": "prettier --cache --cache-strategy metadata --write --list-different .",
+    "prettier:check": "prettier --cache --cache-strategy metadata --check .",
+    "check:spelling": "cspell --cache --no-progress \"**/*\"",
+    "build:npm:dual": "node --loader ts-node/esm resources/build-npm-dual.ts",
+    "build:npm:esm-only": "node --loader ts-node/esm resources/build-npm-esm-only.ts",
+    "build:deno": "node --loader ts-node/esm resources/build-deno.ts",
+    "diff:npm": "node --loader ts-node/esm resources/diff-npm-package.ts",
+    "changeset": "changeset add",
+    "changeset:version": "changeset version && npm install --package-lock-only",
+    "changeset:publish": "node --loader ts-node/esm resources/prepare-for-publish.ts && cd publishWorkspaceConfig && changeset publish"
+  },
   "publishConfig": {
     "tag": "alpha"
-  },
-  "dependencies": {
-    "graphql": "^17.0.0-alpha.8"
   }
 }
