@@ -17,7 +17,7 @@ export type ExecutionPlanBuilder = (
   parentDeferUsages?: DeferUsageSet,
 ) => ExecutionPlan;
 
-type FieldTransformer = (
+export type FieldTransformer = (
   value: unknown,
   field: GraphQLField,
   parent: ObjMap<unknown>,
@@ -29,7 +29,7 @@ type FieldTransformers = ObjMap<FieldTransformer>;
 
 type ObjectFieldTransformers = ObjMap<FieldTransformers>;
 
-type LeafTransformer = (
+export type LeafTransformer = (
   value: unknown,
   type: GraphQLLeafType,
   path: Path,

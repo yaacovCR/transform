@@ -38,7 +38,11 @@ import { addPath, pathToArray } from '../jsutils/Path.js';
 import type { PromiseOrValue } from '../jsutils/PromiseOrValue.js';
 
 import type { DeferUsageSet, ExecutionPlan } from './buildExecutionPlan.js';
-import type { TransformationContext } from './buildTransformationContext.js';
+import type {
+  FieldTransformer,
+  LeafTransformer,
+  TransformationContext,
+} from './buildTransformationContext.js';
 import { EmbeddedErrors } from './EmbeddedError.js';
 import { filter } from './filter.js';
 import type {
@@ -178,14 +182,17 @@ function completeValue(
   }
 
   if (isLeafType(nullableType)) {
-    return maybeTransformLeafValue(
-      context,
-      nullableType,
-      fieldDetailsList,
-      result,
-      path,
-      incrementalContext,
-    );
+    const leafTransformer = context.leafTransformers[nullableType.name];
+    return leafTransformer === undefined
+      ? result
+      : transformLeafValue(
+          leafTransformer,
+          nullableType,
+          fieldDetailsList,
+          result,
+          path,
+          incrementalContext,
+        );
   }
 
   if (isListType(nullableType)) {
@@ -257,21 +264,16 @@ function completeValue(
 }
 
 // eslint-disable-next-line @typescript-eslint/max-params
-function maybeTransformLeafValue(
-  context: TransformationContext,
+function transformLeafValue(
+  leafTransformer: LeafTransformer,
   type: GraphQLLeafType,
   fieldDetailsList: ReadonlyArray<FieldDetails>,
   value: unknown,
   path: Path,
   incrementalContext: IncrementalContext,
 ): PromiseOrValue<unknown> {
-  const transformer = context.leafTransformers[type.name];
-  if (transformer === undefined) {
-    return value;
-  }
-
   try {
-    const transformed = transformer(value, type, path);
+    const transformed = leafTransformer(value, type, path);
 
     if (transformed === null) {
       if (!path.nullable) {
@@ -321,36 +323,70 @@ function completeObjectValue(
   } = context;
   const completedObject = Object.create(null);
 
-  for (const [responseName, fieldDetailsList] of groupedFieldSet) {
-    const fieldName = fieldDetailsList[0].node.name.value;
-    const fieldDef = schema.getField(runtimeType, fieldName);
+  const objectFieldTransformers =
+    context.objectFieldTransformers[runtimeType.name];
+  if (objectFieldTransformers === undefined) {
+    for (const [responseName, fieldDetailsList] of groupedFieldSet) {
+      const fieldName = fieldDetailsList[0].node.name.value;
+      const fieldDef = schema.getField(runtimeType, fieldName);
 
-    if (fieldDef) {
-      const fieldType = fieldDef.type;
-      const nullableType = getNullableType(fieldType);
-      const fieldPath = addPath(path, responseName, nullableType === fieldType);
-      const completed = completeValue(
-        context,
-        nullableType,
-        fieldDetailsList,
-        originalData[responseName],
-        fieldPath,
-        incrementalContext,
-        deferMap,
-      );
+      if (fieldDef) {
+        const fieldType = fieldDef.type;
+        const nullableType = getNullableType(fieldType);
+        const fieldPath = addPath(
+          path,
+          responseName,
+          nullableType === fieldType,
+        );
+        completedObject[responseName] = completeValue(
+          context,
+          nullableType,
+          fieldDetailsList,
+          originalData[responseName],
+          fieldPath,
+          incrementalContext,
+          deferMap,
+        );
+      }
+    }
+  } else {
+    for (const [responseName, fieldDetailsList] of groupedFieldSet) {
+      const fieldName = fieldDetailsList[0].node.name.value;
+      const fieldDef = schema.getField(runtimeType, fieldName);
 
-      const maybeTransformed = maybeTransformFieldValue(
-        context,
-        runtimeType,
-        completedObject,
-        responseName,
-        fieldDef,
-        fieldDetailsList,
-        completed,
-        fieldPath,
-        incrementalContext,
-      );
-      completedObject[responseName] = maybeTransformed;
+      if (fieldDef) {
+        const fieldType = fieldDef.type;
+        const nullableType = getNullableType(fieldType);
+        const fieldPath = addPath(
+          path,
+          responseName,
+          nullableType === fieldType,
+        );
+        const completed = completeValue(
+          context,
+          nullableType,
+          fieldDetailsList,
+          originalData[responseName],
+          fieldPath,
+          incrementalContext,
+          deferMap,
+        );
+
+        const fieldTransformer = objectFieldTransformers[fieldName];
+        completedObject[responseName] =
+          fieldTransformer === undefined
+            ? completed
+            : transformFieldValue(
+                fieldTransformer,
+                completedObject,
+                responseName,
+                fieldDef,
+                fieldDetailsList,
+                completed,
+                fieldPath,
+                incrementalContext,
+              );
+      }
     }
   }
 
@@ -358,9 +394,8 @@ function completeObjectValue(
 }
 
 // eslint-disable-next-line @typescript-eslint/max-params
-function maybeTransformFieldValue(
-  context: TransformationContext,
-  parentType: GraphQLObjectType,
+function transformFieldValue(
+  fieldTransformer: FieldTransformer,
   parent: ObjMap<unknown>,
   responseKey: string,
   fieldDef: GraphQLField,
@@ -369,15 +404,14 @@ function maybeTransformFieldValue(
   path: Path,
   incrementalContext: IncrementalContext,
 ): PromiseOrValue<unknown> {
-  const transformer =
-    context.objectFieldTransformers[parentType.name]?.[fieldDef.name];
-
-  if (transformer === undefined) {
-    return value;
-  }
-
   try {
-    const transformed = transformer(value, fieldDef, parent, responseKey, path);
+    const transformed = fieldTransformer(
+      value,
+      fieldDef,
+      parent,
+      responseKey,
+      path,
+    );
 
     if (transformed === null) {
       if (!path.nullable) {
