@@ -32,7 +32,7 @@ describe('buildTransformationContext', () => {
 
     const context = buildTransformationContext(
       validatedExecutionArgs,
-      { leafTransformers: {} },
+      { objectFieldTransformers: {}, leafTransformers: {} },
       buildExecutionPlan,
       '__prefix__',
     );
@@ -53,7 +53,7 @@ describe('buildTransformationContext', () => {
     expect(() =>
       buildTransformationContext(
         validatedExecutionArgs,
-        { leafTransformers: {} },
+        { objectFieldTransformers: {}, leafTransformers: {} },
         buildExecutionPlan,
         '__prefix__',
       ),
