@@ -7,7 +7,7 @@ import type {
 import type { GroupedFieldSet } from 'graphql/execution/collectFields.js';
 
 import type { ObjMap } from '../jsutils/ObjMap.js';
-import type { PromiseOrValue } from '../jsutils/PromiseOrValue.js';
+import type { Path } from '../jsutils/Path.js';
 
 import { addNewLabels } from './addNewLabels.js';
 import type { DeferUsageSet, ExecutionPlan } from './buildExecutionPlan.js';
@@ -20,7 +20,10 @@ export type ExecutionPlanBuilder = (
 type FieldTransformer = (
   value: unknown,
   field: GraphQLField,
-) => PromiseOrValue<unknown>;
+  parent: ObjMap<unknown>,
+  responseKey: string,
+  path: Path,
+) => unknown;
 
 type FieldTransformers = ObjMap<FieldTransformer>;
 
@@ -29,7 +32,8 @@ type ObjectFieldTransformers = ObjMap<FieldTransformers>;
 type LeafTransformer = (
   value: unknown,
   type: GraphQLLeafType,
-) => PromiseOrValue<unknown>;
+  path: Path,
+) => unknown;
 
 type LeafTransformers = ObjMap<LeafTransformer>;
 

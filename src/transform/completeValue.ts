@@ -31,13 +31,11 @@ import {
 import { BoxedPromiseOrValue } from '../jsutils/BoxedPromiseOrValue.js';
 import { invariant } from '../jsutils/invariant.js';
 import { isObjectLike } from '../jsutils/isObjectLike.js';
-import { isPromise } from '../jsutils/isPromise.js';
 import { memoize3 } from '../jsutils/memoize3.js';
 import type { ObjMap } from '../jsutils/ObjMap.js';
 import type { Path } from '../jsutils/Path.js';
 import { addPath, pathToArray } from '../jsutils/Path.js';
 import type { PromiseOrValue } from '../jsutils/PromiseOrValue.js';
-import { PromiseRegistry } from '../jsutils/PromiseRegistry.js';
 
 import type { DeferUsageSet, ExecutionPlan } from './buildExecutionPlan.js';
 import type { TransformationContext } from './buildTransformationContext.js';
@@ -53,7 +51,6 @@ import type {
 } from './types.js';
 
 interface IncrementalContext {
-  promiseRegistry: PromiseRegistry;
   newErrors: Map<Path | undefined, GraphQLError>;
   originalErrors: Array<GraphQLError>;
   incrementalDataRecords: Array<IncrementalDataRecord>;
@@ -93,7 +90,6 @@ export function completeInitialResult(
   incrementalDataRecords: ReadonlyArray<IncrementalDataRecord>;
 }> {
   const incrementalContext: IncrementalContext = {
-    promiseRegistry: new PromiseRegistry(),
     newErrors: new Map(),
     originalErrors: [],
     incrementalDataRecords: [],
@@ -142,27 +138,11 @@ export function completeInitialResult(
     newDeferMap,
   );
 
-  const promiseRegistry = incrementalContext.promiseRegistry;
-  return promiseRegistry.pending()
-    ? promiseRegistry
-        .wait()
-        .then(() => resolveInitialResult(completed, incrementalContext))
-    : resolveInitialResult(completed, incrementalContext);
-}
-
-function resolveInitialResult(
-  completedObject: ObjMap<unknown>,
-  incrementalContext: IncrementalContext,
-): {
-  data: ObjMap<unknown>;
-  errors: ReadonlyArray<GraphQLError>;
-  incrementalDataRecords: ReadonlyArray<IncrementalDataRecord>;
-} {
   const { newErrors, originalErrors, incrementalDataRecords } =
     incrementalContext;
 
   const { filteredData, filteredRecords } = filter(
-    completedObject,
+    completed,
     undefined,
     newErrors,
     incrementalDataRecords,
@@ -184,7 +164,7 @@ function completeValue(
   path: Path,
   incrementalContext: IncrementalContext,
   deferMap: ReadonlyMap<DeferUsage, DeferredFragment> | undefined,
-): PromiseOrValue<unknown> {
+): unknown {
   if (result == null) {
     return null;
   }
@@ -291,53 +271,24 @@ function maybeTransformLeafValue(
   }
 
   try {
-    const transformed = transformer(value, type);
+    const transformed = transformer(value, type, path);
 
-    if (isPromise(transformed)) {
-      return transformed
-        .then((resolved: unknown) =>
-          handleTransformedLeafValue(
-            resolved,
-            fieldDetailsList,
-            path,
-            incrementalContext,
-          ),
-        )
-        .then(undefined, (rawError: unknown) =>
-          handleRawError(rawError, fieldDetailsList, path, incrementalContext),
+    if (transformed === null) {
+      if (!path.nullable) {
+        const fieldName = fieldDetailsList[0].node.name.value;
+        throw new Error(
+          `Cannot return null for non-nullable field ${fieldName}.`,
         );
+      }
+      return null;
+    } else if (transformed instanceof Error) {
+      handleRawError(transformed, fieldDetailsList, path, incrementalContext);
+      return null;
     }
-
-    return handleTransformedLeafValue(
-      transformed,
-      fieldDetailsList,
-      path,
-      incrementalContext,
-    );
+    return transformed;
   } catch (rawError) {
     return handleRawError(rawError, fieldDetailsList, path, incrementalContext);
   }
-}
-
-function handleTransformedLeafValue(
-  transformed: unknown,
-  fieldDetailsList: ReadonlyArray<FieldDetails>,
-  path: Path,
-  incrementalContext: IncrementalContext,
-): unknown {
-  if (transformed === null) {
-    if (!path.nullable) {
-      const fieldName = fieldDetailsList[0].node.name.value;
-      throw new Error(
-        `Cannot return null for non-nullable field ${fieldName}.`,
-      );
-    }
-    return null;
-  } else if (transformed instanceof Error) {
-    handleRawError(transformed, fieldDetailsList, path, incrementalContext);
-    return null;
-  }
-  return transformed;
 }
 
 function handleRawError(
@@ -388,45 +339,18 @@ function completeObjectValue(
         deferMap,
       );
 
-      if (isPromise(completed)) {
-        completedObject[responseName] = undefined;
-        incrementalContext.promiseRegistry.add(
-          completed
-            .then((resolved) =>
-              maybeTransformFieldValue(
-                context,
-                runtimeType,
-                fieldDef,
-                fieldDetailsList,
-                resolved,
-                fieldPath,
-                incrementalContext,
-              ),
-            )
-            .then((maybeTransformed) => {
-              completedObject[responseName] = maybeTransformed;
-            }),
-        );
-      } else {
-        const maybeTransformed = maybeTransformFieldValue(
-          context,
-          runtimeType,
-          fieldDef,
-          fieldDetailsList,
-          completed,
-          fieldPath,
-          incrementalContext,
-        );
-        if (isPromise(maybeTransformed)) {
-          incrementalContext.promiseRegistry.add(
-            maybeTransformed.then((resolved) => {
-              completedObject[responseName] = resolved;
-            }),
-          );
-        } else {
-          completedObject[responseName] = maybeTransformed;
-        }
-      }
+      const maybeTransformed = maybeTransformFieldValue(
+        context,
+        runtimeType,
+        completedObject,
+        responseName,
+        fieldDef,
+        fieldDetailsList,
+        completed,
+        fieldPath,
+        incrementalContext,
+      );
+      completedObject[responseName] = maybeTransformed;
     }
   }
 
@@ -437,6 +361,8 @@ function completeObjectValue(
 function maybeTransformFieldValue(
   context: TransformationContext,
   parentType: GraphQLObjectType,
+  parent: ObjMap<unknown>,
+  responseKey: string,
   fieldDef: GraphQLField,
   fieldDetailsList: ReadonlyArray<FieldDetails>,
   value: unknown,
@@ -451,53 +377,23 @@ function maybeTransformFieldValue(
   }
 
   try {
-    const transformed = transformer(value, fieldDef);
+    const transformed = transformer(value, fieldDef, parent, responseKey, path);
 
-    if (isPromise(transformed)) {
-      return transformed
-        .then((resolved: unknown) =>
-          handleTransformedFieldValue(
-            resolved,
-            fieldDef,
-            fieldDetailsList,
-            path,
-            incrementalContext,
-          ),
-        )
-        .then(undefined, (rawError: unknown) =>
-          handleRawError(rawError, fieldDetailsList, path, incrementalContext),
+    if (transformed === null) {
+      if (!path.nullable) {
+        throw new Error(
+          `Cannot return null for non-nullable field ${fieldDef}.`,
         );
+      }
+      return null;
+    } else if (transformed instanceof Error) {
+      handleRawError(transformed, fieldDetailsList, path, incrementalContext);
+      return null;
     }
-
-    return handleTransformedFieldValue(
-      transformed,
-      fieldDef,
-      fieldDetailsList,
-      path,
-      incrementalContext,
-    );
+    return transformed;
   } catch (rawError) {
     return handleRawError(rawError, fieldDetailsList, path, incrementalContext);
   }
-}
-
-function handleTransformedFieldValue(
-  transformed: unknown,
-  fieldDef: GraphQLField,
-  fieldDetailsList: ReadonlyArray<FieldDetails>,
-  path: Path,
-  incrementalContext: IncrementalContext,
-): unknown {
-  if (transformed === null) {
-    if (!path.nullable) {
-      throw new Error(`Cannot return null for non-nullable field ${fieldDef}.`);
-    }
-    return null;
-  } else if (transformed instanceof Error) {
-    handleRawError(transformed, fieldDetailsList, path, incrementalContext);
-    return null;
-  }
-  return transformed;
 }
 
 // eslint-disable-next-line @typescript-eslint/max-params
@@ -538,19 +434,7 @@ function completeListValue(
       deferMap,
     );
 
-    // TODO: add test case
-    /* c8 ignore start */
-    if (isPromise(completedItem)) {
-      completedItems.push(undefined);
-      incrementalContext.promiseRegistry.add(
-        completedItem.then((resolved) => {
-          completedItems[index] = resolved;
-        }),
-      );
-    } else {
-      /* c8 ignore stop */
-      completedItems.push(completedItem);
-    }
+    completedItems.push(completedItem);
   }
 
   if (streamUsage && result.length >= streamUsage.initialCount) {
@@ -670,7 +554,6 @@ function collectExecutionGroups(
           groupedFieldSet,
           runtimeType,
           {
-            promiseRegistry: new PromiseRegistry(),
             newErrors: new Map(),
             originalErrors: [],
             incrementalDataRecords: [],
@@ -714,34 +597,11 @@ function executeExecutionGroup(
     deferMap,
   );
 
-  const promiseRegistry = incrementalContext.promiseRegistry;
-  return promiseRegistry.pending()
-    ? promiseRegistry
-        .wait()
-        .then(() =>
-          resolveExecutionGroupResult(
-            completed,
-            pendingExecutionGroup,
-            incrementalContext,
-          ),
-        )
-    : resolveExecutionGroupResult(
-        completed,
-        pendingExecutionGroup,
-        incrementalContext,
-      );
-}
-
-function resolveExecutionGroupResult(
-  completedObject: ObjMap<unknown>,
-  pendingExecutionGroup: PendingExecutionGroup,
-  incrementalContext: IncrementalContext,
-): ExecutionGroupResult {
   const { newErrors, originalErrors, incrementalDataRecords } =
     incrementalContext;
 
   const { filteredData, filteredRecords } = filter(
-    completedObject,
+    completed,
     pendingExecutionGroup.path,
     newErrors,
     incrementalDataRecords,
@@ -829,7 +689,6 @@ function maybeAddStream(
         path,
         index,
         {
-          promiseRegistry: new PromiseRegistry(),
           newErrors: new Map(),
           originalErrors: [],
           incrementalDataRecords: [],
@@ -850,7 +709,7 @@ function executeStreamItem(
   path: Path,
   index: number,
   incrementalContext: IncrementalContext,
-): PromiseOrValue<StreamItemResult> {
+): StreamItemResult {
   const nullableType = getNullableType(itemType);
   const completed = completeValue(
     context,
@@ -862,46 +721,13 @@ function executeStreamItem(
     undefined,
   );
 
-  if (isPromise(completed)) {
-    return completed.then((resolved) =>
-      resolveStreamItemResult(resolved, path, incrementalContext),
-    );
-  }
-  return resolveStreamItemResult(completed, path, incrementalContext);
-}
-
-function resolveStreamItemResult(
-  completedItem: unknown,
-  path: Path,
-  incrementalContext: IncrementalContext,
-): PromiseOrValue<StreamItemResult> {
-  const promiseRegistry = incrementalContext.promiseRegistry;
-  // TODO: add test case?
-  return promiseRegistry.pending()
-    ? /* c8 ignore start */ promiseRegistry
-        .wait()
-        .then(() =>
-          buildStreamItemResult(completedItem, path, incrementalContext),
-        )
-    : /* c8 ignore stop */ buildStreamItemResult(
-        completedItem,
-        path,
-        incrementalContext,
-      );
-}
-
-function buildStreamItemResult(
-  completedItem: unknown,
-  path: Path,
-  incrementalContext: IncrementalContext,
-): StreamItemResult {
   const { newErrors, originalErrors, incrementalDataRecords } =
     incrementalContext;
 
   const errors = [...originalErrors, ...newErrors.values()];
 
   const { filteredData, filteredRecords } = filter(
-    [completedItem],
+    [completed],
     path,
     newErrors,
     incrementalDataRecords,

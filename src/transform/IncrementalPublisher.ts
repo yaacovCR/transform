@@ -141,6 +141,8 @@ export class IncrementalPublisher<TSubsequent, TIncremental> {
         return { value: subsequentPayload, done: false };
       }
 
+      // TODO: add test case for async transformation
+      /* c8 ignore next 8 */
       if (this._incrementalGraph.hasPending()) {
         // eslint-disable-next-line no-await-in-loop
         batch = await this._incrementalGraph.nextCompletedBatch();
