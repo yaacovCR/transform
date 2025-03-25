@@ -1,5 +1,6 @@
 import type {
   GraphQLError,
+  GraphQLField,
   GraphQLLeafType,
   GraphQLNullableOutputType,
   GraphQLObjectType,
@@ -295,7 +296,7 @@ function maybeTransformLeafValue(
     if (isPromise(transformed)) {
       return transformed
         .then((resolved: unknown) =>
-          handleTransformed(
+          handleTransformedLeafValue(
             resolved,
             fieldDetailsList,
             path,
@@ -307,7 +308,7 @@ function maybeTransformLeafValue(
         );
     }
 
-    return handleTransformed(
+    return handleTransformedLeafValue(
       transformed,
       fieldDetailsList,
       path,
@@ -318,7 +319,7 @@ function maybeTransformLeafValue(
   }
 }
 
-function handleTransformed(
+function handleTransformedLeafValue(
   transformed: unknown,
   fieldDetailsList: ReadonlyArray<FieldDetails>,
   path: Path,
@@ -376,12 +377,13 @@ function completeObjectValue(
     if (fieldDef) {
       const fieldType = fieldDef.type;
       const nullableType = getNullableType(fieldType);
+      const fieldPath = addPath(path, responseName, nullableType === fieldType);
       const completed = completeValue(
         context,
         nullableType,
         fieldDetailsList,
         originalData[responseName],
-        addPath(path, responseName, nullableType === fieldType),
+        fieldPath,
         incrementalContext,
         deferMap,
       );
@@ -389,17 +391,113 @@ function completeObjectValue(
       if (isPromise(completed)) {
         completedObject[responseName] = undefined;
         incrementalContext.promiseRegistry.add(
-          completed.then((resolved) => {
-            completedObject[responseName] = resolved;
-          }),
+          completed
+            .then((resolved) =>
+              maybeTransformFieldValue(
+                context,
+                runtimeType,
+                fieldDef,
+                fieldDetailsList,
+                resolved,
+                fieldPath,
+                incrementalContext,
+              ),
+            )
+            .then((maybeTransformed) => {
+              completedObject[responseName] = maybeTransformed;
+            }),
         );
       } else {
-        completedObject[responseName] = completed;
+        const maybeTransformed = maybeTransformFieldValue(
+          context,
+          runtimeType,
+          fieldDef,
+          fieldDetailsList,
+          completed,
+          fieldPath,
+          incrementalContext,
+        );
+        if (isPromise(maybeTransformed)) {
+          incrementalContext.promiseRegistry.add(
+            maybeTransformed.then((resolved) => {
+              completedObject[responseName] = resolved;
+            }),
+          );
+        } else {
+          completedObject[responseName] = maybeTransformed;
+        }
       }
     }
   }
 
   return completedObject;
+}
+
+// eslint-disable-next-line @typescript-eslint/max-params
+function maybeTransformFieldValue(
+  context: TransformationContext,
+  parentType: GraphQLObjectType,
+  fieldDef: GraphQLField,
+  fieldDetailsList: ReadonlyArray<FieldDetails>,
+  value: unknown,
+  path: Path,
+  incrementalContext: IncrementalContext,
+): PromiseOrValue<unknown> {
+  const transformer =
+    context.objectFieldTransformers[parentType.name]?.[fieldDef.name];
+
+  if (transformer === undefined) {
+    return value;
+  }
+
+  try {
+    const transformed = transformer(value, fieldDef);
+
+    if (isPromise(transformed)) {
+      return transformed
+        .then((resolved: unknown) =>
+          handleTransformedFieldValue(
+            resolved,
+            fieldDef,
+            fieldDetailsList,
+            path,
+            incrementalContext,
+          ),
+        )
+        .then(undefined, (rawError: unknown) =>
+          handleRawError(rawError, fieldDetailsList, path, incrementalContext),
+        );
+    }
+
+    return handleTransformedFieldValue(
+      transformed,
+      fieldDef,
+      fieldDetailsList,
+      path,
+      incrementalContext,
+    );
+  } catch (rawError) {
+    return handleRawError(rawError, fieldDetailsList, path, incrementalContext);
+  }
+}
+
+function handleTransformedFieldValue(
+  transformed: unknown,
+  fieldDef: GraphQLField,
+  fieldDetailsList: ReadonlyArray<FieldDetails>,
+  path: Path,
+  incrementalContext: IncrementalContext,
+): unknown {
+  if (transformed === null) {
+    if (!path.nullable) {
+      throw new Error(`Cannot return null for non-nullable field ${fieldDef}.`);
+    }
+    return null;
+  } else if (transformed instanceof Error) {
+    handleRawError(transformed, fieldDetailsList, path, incrementalContext);
+    return null;
+  }
+  return transformed;
 }
 
 // eslint-disable-next-line @typescript-eslint/max-params

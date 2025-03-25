@@ -110,7 +110,6 @@ function nullDataAtPath(
       return;
     } /* c8 ignore start */
 
-    // TODO: add test case for deeper errors
     parent = (data as ObjMap<unknown>)[key];
-  } /* c8 ignore stop */
+  }
 }

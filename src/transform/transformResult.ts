@@ -37,7 +37,13 @@ export function transformResult<
   TIncremental = ExperimentalIncrementalExecutionResults,
 >(
   args: ExecutionArgs,
-  transformers: Transformers = { leafTransformers: {} },
+  {
+    objectFieldTransformers = {},
+    leafTransformers = {},
+  }: Partial<Transformers> = {
+    objectFieldTransformers: {},
+    leafTransformers: {},
+  },
   payloadPublisher: PayloadPublisher<
     TSubsequent,
     TIncremental
@@ -56,7 +62,10 @@ export function transformResult<
 
   const context = buildTransformationContext(
     originalArgs,
-    transformers,
+    {
+      objectFieldTransformers,
+      leafTransformers,
+    },
     executionPlanBuilder,
     prefix,
   );
@@ -101,7 +110,7 @@ function transformOriginalResult<TSubsequent, TIncremental>(
             subsequentResults,
           ),
         )
-      : /* c8 ignore stop */ buildIncrementalResponse(
+      : buildIncrementalResponse(
           data,
           completed,
           payloadPublisher,
