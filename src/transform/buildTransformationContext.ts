@@ -3,9 +3,12 @@ import type {
   GraphQLLeafType,
   ValidatedExecutionArgs,
 } from 'graphql';
-// eslint-disable-next-line n/no-missing-import
-import type { GroupedFieldSet } from 'graphql/execution/collectFields.js';
+import type {
+  GroupedFieldSet,
+  // eslint-disable-next-line n/no-missing-import
+} from 'graphql/execution/collectFields.js';
 
+import { mapKey } from '../jsutils/mapKey.js';
 import type { ObjMap } from '../jsutils/ObjMap.js';
 import type { Path } from '../jsutils/Path.js';
 
@@ -20,8 +23,6 @@ export type ExecutionPlanBuilder = (
 export type FieldTransformer = (
   value: unknown,
   field: GraphQLField,
-  parent: ObjMap<unknown>,
-  responseKey: string,
   path: Path,
 ) => unknown;
 
@@ -37,7 +38,10 @@ export type LeafTransformer = (
 
 type LeafTransformers = ObjMap<LeafTransformer>;
 
+type PathScopedFieldTransformers = ObjMap<FieldTransformer>;
+
 export interface Transformers {
+  pathScopedFieldTransformers?: PathScopedFieldTransformers;
   objectFieldTransformers?: ObjectFieldTransformers;
   leafTransformers?: LeafTransformers;
 }
@@ -45,6 +49,7 @@ export interface Transformers {
 export interface TransformationContext {
   argsWithNewLabels: ValidatedExecutionArgs;
   originalLabels: Map<string, string | undefined>;
+  pathScopedFieldTransformers: PathScopedFieldTransformers;
   objectFieldTransformers: ObjectFieldTransformers;
   leafTransformers: LeafTransformers;
   executionPlanBuilder: ExecutionPlanBuilder;
@@ -62,12 +67,21 @@ export function buildTransformationContext(
     originalArgs,
   );
 
-  const { objectFieldTransformers = {}, leafTransformers = {} } = transformers;
+  const {
+    objectFieldTransformers = {},
+    pathScopedFieldTransformers = {},
+    leafTransformers = {},
+  } = transformers;
 
   return {
     argsWithNewLabels,
     originalLabels,
     objectFieldTransformers,
+    pathScopedFieldTransformers: mapKey(
+      pathScopedFieldTransformers,
+      //by modifying the keys, identical pathStr logic can be utilized for root fields and subfields
+      (key) => `.${key}`,
+    ),
     leafTransformers,
     executionPlanBuilder,
     prefix,

@@ -24,8 +24,10 @@ pnpm add @yaacovCR/transform graphql@17.0.0-alpha.8
 
 This library offers:
 
-- Configurable synchronous leaf value and object field transformers for modifying GraphQL results.
+- Configurable synchronous leaf value transformers, object field transformers, and path-scoped field transformers for modifying GraphQL results.
 - Mapping from the latest incremental delivery format to the legacy format.
+
+Note: In the case of multiple transformers, execution is in the above order: first any leaf value transformer is executed, followed by any object field transformer, and then the path-scoped field transformer.
 
 Planned:
 
@@ -101,10 +103,30 @@ type ObjectFieldTransformers = ObjMap<ObjMap<FieldTransformer>>;
 type FieldTransformer = (
   value: unknown,
   field: GraphQLField,
-  parent: ObjMap<unknown>,
-  responseKey: string,
   path: Path,
 ) => unknown;
+```
+
+### Configurable Path Scoped Field Transformers
+
+Pass `pathScopedFieldTransformers` in a `Transformers` object to `transformResult()`, keyed by a period-delimited path to the given field within the operation. (Numeric indices for list fields are simply skipped, reflecting the path within the given operation rather than the result.)
+
+```ts
+import { transformResult } from '@yaacovCR/transform';
+
+const originalResult = await experimentalExecuteIncrementally({
+  schema,
+  document,
+  rootValue,
+  contextValue,
+  variableValues,
+});
+
+const transformed = await transformResult(originalResult, {
+  objectFieldTransformers: {
+    'someType.someFieldNameOrAlias': (value) => 'transformed',
+  },
+});
 ```
 
 ### Legacy Incremental Delivery Format

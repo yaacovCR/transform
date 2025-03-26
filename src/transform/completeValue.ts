@@ -128,6 +128,7 @@ export function completeInitialResult(
     rootType,
     originalData,
     undefined,
+    '',
     incrementalContext,
     newDeferMap,
   );
@@ -137,6 +138,7 @@ export function completeInitialResult(
     rootType,
     originalData,
     undefined,
+    '',
     newGroupedFieldSets,
     incrementalContext,
     newDeferMap,
@@ -166,6 +168,7 @@ function completeValue(
   fieldDetailsList: ReadonlyArray<FieldDetails>,
   result: unknown,
   path: Path,
+  pathStr: string,
   incrementalContext: IncrementalContext,
   deferMap: ReadonlyMap<DeferUsage, DeferredFragment> | undefined,
 ): unknown {
@@ -206,6 +209,7 @@ function completeValue(
       fieldDetailsList,
       result,
       path,
+      pathStr,
       incrementalContext,
       deferMap,
     );
@@ -246,6 +250,7 @@ function completeValue(
     runtimeType,
     result,
     path,
+    pathStr,
     incrementalContext,
     newDeferMap,
   );
@@ -255,6 +260,7 @@ function completeValue(
     runtimeType,
     result,
     path,
+    pathStr,
     newGroupedFieldSets,
     incrementalContext,
     newDeferMap,
@@ -315,6 +321,7 @@ function completeObjectValue(
   runtimeType: GraphQLObjectType,
   originalData: ObjMap<unknown>,
   path: Path | undefined,
+  pathStr: string,
   incrementalContext: IncrementalContext,
   deferMap: ReadonlyMap<DeferUsage, DeferredFragment> | undefined,
 ): ObjMap<unknown> {
@@ -325,68 +332,44 @@ function completeObjectValue(
 
   const objectFieldTransformers =
     context.objectFieldTransformers[runtimeType.name];
-  if (objectFieldTransformers === undefined) {
-    for (const [responseName, fieldDetailsList] of groupedFieldSet) {
-      const fieldName = fieldDetailsList[0].node.name.value;
-      const fieldDef = schema.getField(runtimeType, fieldName);
+  const pathScopedFieldTransformers = context.pathScopedFieldTransformers;
+  for (const [responseName, fieldDetailsList] of groupedFieldSet) {
+    const fieldName = fieldDetailsList[0].node.name.value;
+    const fieldDef = schema.getField(runtimeType, fieldName);
 
-      if (fieldDef) {
-        const fieldType = fieldDef.type;
-        const nullableType = getNullableType(fieldType);
-        const fieldPath = addPath(
-          path,
-          responseName,
-          nullableType === fieldType,
-        );
-        completedObject[responseName] = completeValue(
-          context,
-          nullableType,
-          fieldDetailsList,
-          originalData[responseName],
-          fieldPath,
-          incrementalContext,
-          deferMap,
-        );
+    if (fieldDef) {
+      const fieldType = fieldDef.type;
+      const nullableType = getNullableType(fieldType);
+      const fieldPath = addPath(path, responseName, nullableType === fieldType);
+      const fieldPathStr = pathStr + '.' + responseName;
+      let completed = completeValue(
+        context,
+        nullableType,
+        fieldDetailsList,
+        originalData[responseName],
+        fieldPath,
+        fieldPathStr,
+        incrementalContext,
+        deferMap,
+      );
+
+      for (const fieldTransformer of [
+        objectFieldTransformers?.[fieldName],
+        pathScopedFieldTransformers[fieldPathStr],
+      ]) {
+        if (fieldTransformer !== undefined) {
+          completed = transformFieldValue(
+            fieldTransformer,
+            fieldDef,
+            fieldDetailsList,
+            completed,
+            fieldPath,
+            incrementalContext,
+          );
+        }
       }
-    }
-  } else {
-    for (const [responseName, fieldDetailsList] of groupedFieldSet) {
-      const fieldName = fieldDetailsList[0].node.name.value;
-      const fieldDef = schema.getField(runtimeType, fieldName);
 
-      if (fieldDef) {
-        const fieldType = fieldDef.type;
-        const nullableType = getNullableType(fieldType);
-        const fieldPath = addPath(
-          path,
-          responseName,
-          nullableType === fieldType,
-        );
-        const completed = completeValue(
-          context,
-          nullableType,
-          fieldDetailsList,
-          originalData[responseName],
-          fieldPath,
-          incrementalContext,
-          deferMap,
-        );
-
-        const fieldTransformer = objectFieldTransformers[fieldName];
-        completedObject[responseName] =
-          fieldTransformer === undefined
-            ? completed
-            : transformFieldValue(
-                fieldTransformer,
-                completedObject,
-                responseName,
-                fieldDef,
-                fieldDetailsList,
-                completed,
-                fieldPath,
-                incrementalContext,
-              );
-      }
+      completedObject[responseName] = completed;
     }
   }
 
@@ -396,8 +379,6 @@ function completeObjectValue(
 // eslint-disable-next-line @typescript-eslint/max-params
 function transformFieldValue(
   fieldTransformer: FieldTransformer,
-  parent: ObjMap<unknown>,
-  responseKey: string,
   fieldDef: GraphQLField,
   fieldDetailsList: ReadonlyArray<FieldDetails>,
   value: unknown,
@@ -405,13 +386,7 @@ function transformFieldValue(
   incrementalContext: IncrementalContext,
 ): PromiseOrValue<unknown> {
   try {
-    const transformed = fieldTransformer(
-      value,
-      fieldDef,
-      parent,
-      responseKey,
-      path,
-    );
+    const transformed = fieldTransformer(value, fieldDef, path);
 
     if (transformed === null) {
       if (!path.nullable) {
@@ -437,6 +412,7 @@ function completeListValue(
   fieldDetailsList: ReadonlyArray<FieldDetails>,
   result: ReadonlyArray<unknown>,
   path: Path,
+  pathStr: string,
   incrementalContext: IncrementalContext,
   deferMap: ReadonlyMap<DeferUsage, DeferredFragment> | undefined,
 ): Array<unknown> {
@@ -451,6 +427,7 @@ function completeListValue(
         fieldDetailsList,
         result,
         path,
+        pathStr,
         index,
         incrementalContext,
       );
@@ -464,6 +441,7 @@ function completeListValue(
       fieldDetailsList,
       result[index],
       addPath(path, index, nullableType === itemType),
+      pathStr,
       incrementalContext,
       deferMap,
     );
@@ -479,6 +457,7 @@ function completeListValue(
       fieldDetailsList,
       result,
       path,
+      pathStr,
       result.length,
       incrementalContext,
     );
@@ -564,6 +543,7 @@ function collectExecutionGroups(
   runtimeType: GraphQLObjectType,
   result: ObjMap<unknown>,
   path: Path | undefined,
+  pathStr: string,
   newGroupedFieldSets: Map<DeferUsageSet, GroupedFieldSet>,
   incrementalContext: IncrementalContext,
   deferMap: ReadonlyMap<DeferUsage, DeferredFragment>,
@@ -585,6 +565,7 @@ function collectExecutionGroups(
           pendingExecutionGroup,
           result,
           path,
+          pathStr,
           groupedFieldSet,
           runtimeType,
           {
@@ -616,6 +597,7 @@ function executeExecutionGroup(
   pendingExecutionGroup: PendingExecutionGroup,
   result: ObjMap<unknown>,
   path: Path | undefined,
+  pathStr: string,
   groupedFieldSet: GroupedFieldSet,
   runtimeType: GraphQLObjectType,
   incrementalContext: IncrementalContext,
@@ -627,6 +609,7 @@ function executeExecutionGroup(
     runtimeType,
     result,
     path,
+    pathStr,
     incrementalContext,
     deferMap,
   );
@@ -689,6 +672,7 @@ function maybeAddStream(
   fieldDetailsList: ReadonlyArray<FieldDetails>,
   result: ReadonlyArray<unknown>,
   path: Path,
+  pathStr: string,
   nextIndex: number,
   incrementalContext: IncrementalContext,
 ): void {
@@ -721,6 +705,7 @@ function maybeAddStream(
           deferUsage: undefined,
         })),
         path,
+        pathStr,
         index,
         {
           newErrors: new Map(),
@@ -741,6 +726,7 @@ function executeStreamItem(
   itemType: GraphQLOutputType,
   fieldDetailsList: ReadonlyArray<FieldDetails>,
   path: Path,
+  pathStr: string,
   index: number,
   incrementalContext: IncrementalContext,
 ): StreamItemResult {
@@ -751,6 +737,7 @@ function executeStreamItem(
     fieldDetailsList,
     result[index],
     addPath(path, index, nullableType === itemType),
+    pathStr,
     incrementalContext,
     undefined,
   );
