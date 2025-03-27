@@ -62,6 +62,7 @@ interface IncrementalContext {
   newErrors: Map<Path | undefined, GraphQLError>;
   originalErrors: Array<GraphQLError>;
   foundPathScopedObjects: ObjMap<ObjMap<FoundPathScopedObjects>>;
+  deferredFragments: Array<DeferredFragment>;
   incrementalDataRecords: Array<IncrementalDataRecord>;
   deferUsageSet: DeferUsageSet | undefined;
 }
@@ -104,12 +105,14 @@ export function completeInitialResult(
 ): PromiseOrValue<{
   data: ObjMap<unknown>;
   errors: ReadonlyArray<GraphQLError>;
+  deferredFragments: ReadonlyArray<DeferredFragment>;
   incrementalDataRecords: ReadonlyArray<IncrementalDataRecord>;
 }> {
   const incrementalContext: IncrementalContext = {
     newErrors: new Map(),
     originalErrors: [],
     foundPathScopedObjects: Object.create(null),
+    deferredFragments: [],
     incrementalDataRecords: [],
     deferUsageSet: undefined,
   };
@@ -134,7 +137,11 @@ export function completeInitialResult(
     originalGroupedFieldSet,
   );
 
-  const newDeferMap = getNewDeferMap(context, newDeferUsages);
+  const newDeferMap = getNewDeferMap(
+    context,
+    incrementalContext,
+    newDeferUsages,
+  );
 
   const completed = completeObjectValue(
     context,
@@ -174,10 +181,15 @@ function buildInitialResult(
 ): {
   data: ObjMap<unknown>;
   errors: ReadonlyArray<GraphQLError>;
+  deferredFragments: ReadonlyArray<DeferredFragment>;
   incrementalDataRecords: ReadonlyArray<IncrementalDataRecord>;
 } {
-  const { newErrors, originalErrors, incrementalDataRecords } =
-    incrementalContext;
+  const {
+    newErrors,
+    originalErrors,
+    deferredFragments,
+    incrementalDataRecords,
+  } = incrementalContext;
 
   const { filteredData, filteredRecords } = filter(
     completed,
@@ -191,6 +203,7 @@ function buildInitialResult(
   return {
     data: filteredData,
     errors,
+    deferredFragments,
     incrementalDataRecords: filteredRecords,
   };
 }
@@ -431,7 +444,13 @@ function completeValue(
     incrementalContext.deferUsageSet,
   );
 
-  const newDeferMap = getNewDeferMap(context, newDeferUsages, deferMap, path);
+  const newDeferMap = getNewDeferMap(
+    context,
+    incrementalContext,
+    newDeferUsages,
+    deferMap,
+    path,
+  );
 
   const completed = completeObjectValue(
     context,
@@ -676,10 +695,12 @@ function completeListValue(
 
 function getNewDeferMap(
   context: TransformationContext,
+  incrementalContext: IncrementalContext,
   newDeferUsages: ReadonlyArray<DeferUsage>,
   deferMap?: ReadonlyMap<DeferUsage, DeferredFragment>,
   path?: Path,
 ): ReadonlyMap<DeferUsage, DeferredFragment> {
+  const deferredFragments = incrementalContext.deferredFragments;
   const newDeferMap = new Map(deferMap);
 
   // For each new deferUsage object:
@@ -709,6 +730,8 @@ function getNewDeferMap(
       ready: false,
       failed: undefined,
     };
+
+    deferredFragments.push(deferredFragment);
 
     // Update the map.
     newDeferMap.set(newDeferUsage, deferredFragment);
@@ -781,6 +804,7 @@ function collectExecutionGroups(
             newErrors: new Map(),
             originalErrors: [],
             foundPathScopedObjects: Object.create(null),
+            deferredFragments: [],
             incrementalDataRecords: [],
             deferUsageSet,
           },
@@ -847,8 +871,12 @@ function buildExecutionGroupResult(
   completed: ObjMap<unknown>,
   pendingExecutionGroup: PendingExecutionGroup,
 ): ExecutionGroupResult {
-  const { newErrors, originalErrors, incrementalDataRecords } =
-    incrementalContext;
+  const {
+    newErrors,
+    originalErrors,
+    deferredFragments,
+    incrementalDataRecords,
+  } = incrementalContext;
 
   const { filteredData, filteredRecords } = filter(
     completed,
@@ -861,6 +889,7 @@ function buildExecutionGroupResult(
     pendingExecutionGroup,
     data: filteredData,
     errors: [...originalErrors, ...newErrors.values()],
+    deferredFragments,
     incrementalDataRecords: filteredRecords,
   };
 }
@@ -944,6 +973,7 @@ function maybeAddStream(
           newErrors: new Map(),
           originalErrors: [],
           foundPathScopedObjects: Object.create(null),
+          deferredFragments: [],
           incrementalDataRecords: [],
           deferUsageSet: undefined,
         },
@@ -992,8 +1022,12 @@ function buildStreamItemResult(
   completed: unknown,
   path: Path,
 ): StreamItemResult {
-  const { newErrors, originalErrors, incrementalDataRecords } =
-    incrementalContext;
+  const {
+    newErrors,
+    originalErrors,
+    deferredFragments,
+    incrementalDataRecords,
+  } = incrementalContext;
 
   const errors = [...originalErrors, ...newErrors.values()];
 
@@ -1011,6 +1045,7 @@ function buildStreamItemResult(
   return {
     item: filteredData[0],
     errors,
+    deferredFragments,
     incrementalDataRecords: filteredRecords,
   };
 }

@@ -24,12 +24,14 @@ export type StreamItemResult =
 interface SuccessfulStreamItemResult {
   item: unknown;
   errors: ReadonlyArray<GraphQLError>;
+  deferredFragments: ReadonlyArray<DeferredFragment>;
   incrementalDataRecords: ReadonlyArray<IncrementalDataRecord>;
 }
 
 interface FailedStreamItemResult {
   item?: never;
   errors: ReadonlyArray<GraphQLError>;
+  deferredFragments?: never;
   incrementalDataRecords?: never;
 }
 
@@ -52,6 +54,7 @@ export interface StreamItems {
 export interface StreamItemsResult {
   items: ReadonlyArray<unknown>;
   errors: ReadonlyArray<GraphQLError>;
+  deferredFragments: ReadonlyArray<DeferredFragment>;
   incrementalDataRecords: ReadonlyArray<IncrementalDataRecord>;
 }
 
@@ -87,6 +90,7 @@ export interface ExecutionGroupResult {
   pendingExecutionGroup: PendingExecutionGroup;
   data: ObjMap<unknown>;
   errors: ReadonlyArray<GraphQLError>;
+  deferredFragments: ReadonlyArray<DeferredFragment>;
   incrementalDataRecords: ReadonlyArray<IncrementalDataRecord>;
 }
 

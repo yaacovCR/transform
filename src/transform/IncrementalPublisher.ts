@@ -65,9 +65,11 @@ export class IncrementalPublisher<TSubsequent, TIncremental> {
   buildResponse(
     data: ObjMap<unknown>,
     errors: ReadonlyArray<GraphQLError>,
+    deferredFragments: ReadonlyArray<DeferredFragment>,
     incrementalDataRecords: ReadonlyArray<IncrementalDataRecord>,
   ): TIncremental {
     const newRootNodes = this._incrementalGraph.getNewRootNodes(
+      deferredFragments,
       incrementalDataRecords,
     );
 
@@ -193,8 +195,10 @@ export class IncrementalPublisher<TSubsequent, TIncremental> {
       );
       this._incrementalGraph.removeStream(stream);
     } else if (result) {
+      const { deferredFragments, incrementalDataRecords } = result;
       const newRootNodes = this._incrementalGraph.getNewRootNodes(
-        result.incrementalDataRecords,
+        deferredFragments,
+        incrementalDataRecords,
       );
       this._handleNewRootNodes(newRootNodes);
 

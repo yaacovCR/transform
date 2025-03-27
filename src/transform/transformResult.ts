@@ -30,7 +30,7 @@ import { getDefaultPayloadPublisher } from './getDefaultPayloadPublisher.js';
 import { IncrementalPublisher } from './IncrementalPublisher.js';
 import type { PayloadPublisher } from './PayloadPublisher.js';
 import { transformForTargetSubschema } from './transformForTargetSubschema.js';
-import type { IncrementalDataRecord } from './types.js';
+import type { DeferredFragment, IncrementalDataRecord } from './types.js';
 
 export function transformResult<
   TSubsequent = SubsequentIncrementalExecutionResult,
@@ -143,13 +143,15 @@ function buildIncrementalResponse<TSubsequent, TIncremental>(
   initialResult: {
     data: ObjMap<unknown>;
     errors: ReadonlyArray<GraphQLError>;
+    deferredFragments: ReadonlyArray<DeferredFragment>;
     incrementalDataRecords: ReadonlyArray<IncrementalDataRecord>;
   },
   payloadPublisher: PayloadPublisher<TSubsequent, TIncremental>,
   pending?: ReadonlyArray<PendingResult>,
   subsequentResults?: AsyncGenerator<SubsequentIncrementalExecutionResult>,
 ): TIncremental {
-  const { data, errors, incrementalDataRecords } = initialResult;
+  const { data, errors, deferredFragments, incrementalDataRecords } =
+    initialResult;
 
   const incrementalPublisher = new IncrementalPublisher(
     originalData,
@@ -161,6 +163,7 @@ function buildIncrementalResponse<TSubsequent, TIncremental>(
   return incrementalPublisher.buildResponse(
     data,
     errors,
+    deferredFragments,
     incrementalDataRecords,
   );
 }

@@ -46,9 +46,11 @@ export class IncrementalGraph {
   }
 
   getNewRootNodes(
+    deferredFragments: ReadonlyArray<DeferredFragment>,
     incrementalDataRecords: ReadonlyArray<IncrementalDataRecord>,
   ): ReadonlyArray<SubsequentResultRecord> {
     const initialResultChildren = new Set<SubsequentResultRecord>();
+    this._addDeferredFragments(deferredFragments, initialResultChildren);
     this._addIncrementalDataRecords(
       incrementalDataRecords,
       undefined,
@@ -184,6 +186,15 @@ export class IncrementalGraph {
     }
   }
 
+  private _addDeferredFragments(
+    deferredFragments: ReadonlyArray<DeferredFragment>,
+    initialResultChildren?: Set<SubsequentResultRecord>,
+  ): void {
+    for (const deferredFragment of deferredFragments) {
+      this._addDeferredFragment(deferredFragment, initialResultChildren);
+    }
+  }
+
   private _addIncrementalDataRecords(
     incrementalDataRecords: ReadonlyArray<IncrementalDataRecord>,
     parents: ReadonlyArray<DeferredFragment> | undefined,
@@ -282,7 +293,6 @@ export class IncrementalGraph {
       return;
     }
     parent.children.add(deferredFragment);
-    this._addDeferredFragment(parent, initialResultChildren);
   }
 
   private _onExecutionGroup(
@@ -315,6 +325,7 @@ export class IncrementalGraph {
 
     let items: Array<unknown> = [];
     let errors: Array<GraphQLError> = [];
+    const deferredFragments: Array<DeferredFragment> = [];
     let incrementalDataRecords: Array<IncrementalDataRecord> = [];
 
     const streamItemQueue = stream.streamItemQueue;
@@ -328,7 +339,12 @@ export class IncrementalGraph {
         if (items.length > 0) {
           this._enqueue({
             stream,
-            result: { items, errors, incrementalDataRecords },
+            result: {
+              items,
+              errors,
+              deferredFragments,
+              incrementalDataRecords,
+            },
           });
         }
         this._enqueue(
@@ -351,6 +367,7 @@ export class IncrementalGraph {
             result: {
               items,
               errors,
+              deferredFragments,
               incrementalDataRecords,
             },
           });
@@ -376,6 +393,7 @@ export class IncrementalGraph {
             result: {
               items,
               errors,
+              deferredFragments,
               incrementalDataRecords,
             },
           });
@@ -389,13 +407,14 @@ export class IncrementalGraph {
       }
       items.push(item);
       errors.push(...value.errors);
+      deferredFragments.push(...value.deferredFragments);
       incrementalDataRecords.push(...value.incrementalDataRecords);
     }
 
     if (items.length > 0) {
       this._enqueue({
         stream,
-        result: { items, errors, incrementalDataRecords },
+        result: { items, errors, deferredFragments, incrementalDataRecords },
       });
     }
 
