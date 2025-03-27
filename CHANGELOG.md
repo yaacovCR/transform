@@ -1,5 +1,11 @@
 # @yaacovcr/transform
 
+## 0.0.5
+
+### Patch Changes
+
+- 070dac0: Add path-scoped field transformers and path-scoped object extenders.
+
 ## 0.0.4
 
 ### Patch Changes
