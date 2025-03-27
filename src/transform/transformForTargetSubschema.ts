@@ -1,107 +1,162 @@
 import type {
-  SelectionNode,
+  FieldNode,
+  FragmentDefinitionNode,
+  GraphQLCompositeType,
+  GraphQLSchema,
+  OperationDefinitionNode,
   SelectionSetNode,
-  ValidatedExecutionArgs,
 } from 'graphql';
-import { TypeNameMetaFieldDef } from 'graphql';
+import {
+  GraphQLError,
+  Kind,
+  TypeInfo,
+  TypeNameMetaFieldDef,
+  visit,
+  visitWithTypeInfo,
+} from 'graphql';
 // eslint-disable-next-line n/no-missing-import
-import { Kind } from 'graphql/language/kinds.js';
+import type { FragmentDetails } from 'graphql/execution/collectFields.js';
 
+import { invariant } from '../jsutils/invariant.js';
 import { mapValue } from '../jsutils/mapValue.js';
+import type { ObjMap } from '../jsutils/ObjMap.js';
 
 export function transformForTargetSubschema(
-  originalArgs: ValidatedExecutionArgs,
+  operation: OperationDefinitionNode,
+  fragments: ObjMap<FragmentDetails>,
+  targetSchema: GraphQLSchema,
   prefix: string,
-): ValidatedExecutionArgs {
-  const { operation, fragments } = originalArgs;
+):
+  | {
+      operation: OperationDefinitionNode;
+      fragments: ObjMap<FragmentDetails>;
+    }
+  | ReadonlyArray<GraphQLError> {
+  const fragmentDefinitions = mapValue(
+    fragments,
+    (details) => details.definition,
+  );
 
-  const transformedFragments = mapValue(fragments, (details) => ({
-    ...details,
-    definition: {
-      ...details.definition,
-      selectionSet: transformSelectionSet(
-        details.definition.selectionSet,
-        prefix,
+  const transformedFragments = mapValue(fragments, (details) => {
+    const definition = details.definition;
+    const { typeCondition, selectionSet } = definition;
+    const typeName = typeCondition.name.value;
+    const type = targetSchema.getType(typeName) as GraphQLCompositeType;
+    invariant(type != null);
+    return {
+      ...details,
+      definition: {
+        ...definition,
+        selectionSet: transformSelectionSet(
+          targetSchema,
+          selectionSet,
+          type,
+          prefix,
+          fragmentDefinitions,
+        ),
+      },
+    };
+  });
+
+  const { operation: operationType, selectionSet } = operation;
+  const rootType = targetSchema.getRootType(operationType);
+  if (rootType == null) {
+    return [
+      new GraphQLError(
+        `Schema is not configured to execute ${operation.operation} operation.`,
+        {
+          nodes: [operation],
+        },
       ),
-    },
-  }));
+    ];
+  }
 
-  const argsForTargetSubschema: ValidatedExecutionArgs = {
-    ...originalArgs,
-    operation: {
-      ...operation,
-      selectionSet: transformSelectionSet(operation.selectionSet, prefix),
-    },
-    fragmentDefinitions: mapValue(
-      transformedFragments,
-      ({ definition }) => definition,
+  const transformedOperation = {
+    ...operation,
+    selectionSet: transformSelectionSet(
+      targetSchema,
+      selectionSet,
+      rootType,
+      prefix,
+      fragmentDefinitions,
     ),
-    fragments: transformedFragments,
   };
 
-  return argsForTargetSubschema;
+  return {
+    operation: transformedOperation,
+    fragments: transformedFragments,
+  };
 }
 
 function transformSelectionSet(
+  targetSchema: GraphQLSchema,
   selectionSet: SelectionSetNode,
+  initialType: GraphQLCompositeType,
   prefix: string,
+  fragmentDefinitions: ObjMap<FragmentDefinitionNode>,
 ): SelectionSetNode {
-  return {
-    ...selectionSet,
-    selections: [
-      ...selectionSet.selections.map((node) =>
-        transformSelection(prefix, node),
-      ),
-    ],
-  };
-}
+  const typeInfo = new TypeInfo(targetSchema, initialType);
 
-function transformSelection(
-  prefix: string,
-  selection: SelectionNode,
-): SelectionNode {
-  if (selection.kind === Kind.FIELD) {
-    const selectionSet = selection.selectionSet;
-    if (selectionSet) {
-      return {
-        ...selection,
-        selectionSet: transformSubSelectionSet(prefix, selectionSet),
-      };
-    }
-    return {
-      ...selection,
-    };
-  } else if (selection.kind === Kind.INLINE_FRAGMENT) {
-    return {
-      ...selection,
-      selectionSet: transformSelectionSet(selection.selectionSet, prefix),
-    };
-  }
+  const visitor = visitWithTypeInfo(typeInfo, {
+    FragmentSpread(node) {
+      const fragment = fragmentDefinitions[node.name.value];
+      invariant(fragment !== undefined);
+      const typeName = fragment.typeCondition.name.value;
+      const type = targetSchema.getType(typeName);
+      // TODO: fix test coverage
+      /* c8 ignore next 3 */
+      if (!type) {
+        return null;
+      }
+      return undefined;
+    },
+    InlineFragment(node) {
+      if (node.typeCondition) {
+        const typeName = node.typeCondition.name.value;
+        const type = targetSchema.getType(typeName);
+        // TODO: fix test coverage
+        /* c8 ignore next 3 */
+        if (!type) {
+          return null;
+        }
+      }
+      return undefined;
+    },
+    Field(node: FieldNode): FieldNode | null | undefined {
+      const fieldDef = typeInfo.getFieldDef();
+      if (!fieldDef) {
+        return null;
+      }
+      if (node.selectionSet) {
+        // TODO: add test case
+        /* c8 ignore next 3 */
+        if (node.selectionSet.selections.length === 0) {
+          return null;
+        }
+        return {
+          ...node,
+          selectionSet: {
+            ...node.selectionSet,
+            selections: [
+              ...node.selectionSet.selections,
+              {
+                kind: Kind.FIELD,
+                name: {
+                  kind: Kind.NAME,
+                  value: TypeNameMetaFieldDef.name,
+                },
+                alias: {
+                  kind: Kind.NAME,
+                  value: prefix,
+                },
+              },
+            ],
+          },
+        };
+      }
+      return undefined;
+    },
+  });
 
-  return selection;
-}
-
-function transformSubSelectionSet(
-  prefix: string,
-  selectionSet: SelectionSetNode,
-): SelectionSetNode {
-  return {
-    ...selectionSet,
-    selections: [
-      ...selectionSet.selections.map((selection) =>
-        transformSelection(prefix, selection),
-      ),
-      {
-        kind: Kind.FIELD,
-        name: {
-          kind: Kind.NAME,
-          value: TypeNameMetaFieldDef.name,
-        },
-        alias: {
-          kind: Kind.NAME,
-          value: prefix,
-        },
-      },
-    ],
-  };
+  return visit(selectionSet, visitor);
 }

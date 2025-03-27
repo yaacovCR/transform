@@ -1,10 +1,12 @@
 import type {
+  ExecutionResult,
   GraphQLError,
   GraphQLField,
   GraphQLLeafType,
   GraphQLNullableOutputType,
   GraphQLObjectType,
   GraphQLOutputType,
+  OperationDefinitionNode,
   ValidatedExecutionArgs,
 } from 'graphql';
 import {
@@ -19,6 +21,7 @@ import {
 import type {
   DeferUsage,
   FieldDetails,
+  FragmentDetails,
   GroupedFieldSet,
   // eslint-disable-next-line n/no-missing-import
 } from 'graphql/execution/collectFields.js';
@@ -41,6 +44,7 @@ import type { DeferUsageSet, ExecutionPlan } from './buildExecutionPlan.js';
 import type {
   FieldTransformer,
   LeafTransformer,
+  PathSegmentNode,
   TransformationContext,
 } from './buildTransformationContext.js';
 import { EmbeddedErrors } from './EmbeddedError.js';
@@ -53,6 +57,13 @@ import type {
   Stream,
   StreamItemResult,
 } from './types.js';
+
+export interface CompletedInitialResult {
+  data: ObjMap<unknown>;
+  errors: ReadonlyArray<GraphQLError>;
+  deferredFragments: ReadonlyArray<DeferredFragment>;
+  incrementalDataRecords: ReadonlyArray<IncrementalDataRecord>;
+}
 
 interface IncrementalContext {
   deferUsageSet: DeferUsageSet | undefined;
@@ -88,13 +99,17 @@ const collectSubfields = memoize3(
 
 export function completeInitialResult(
   context: TransformationContext,
-  originalData: ObjMap<unknown>,
-): PromiseOrValue<{
-  data: ObjMap<unknown>;
-  errors: ReadonlyArray<GraphQLError>;
-  deferredFragments: ReadonlyArray<DeferredFragment>;
-  incrementalDataRecords: ReadonlyArray<IncrementalDataRecord>;
-}> {
+  operation: OperationDefinitionNode,
+  fragments: ObjMap<FragmentDetails>,
+  originalData: ObjMap<unknown> | EmbeddedErrors,
+): ExecutionResult | PromiseOrValue<CompletedInitialResult> {
+  if (originalData instanceof EmbeddedErrors) {
+    return {
+      errors: originalData.errors,
+      data: null,
+    };
+  }
+
   const incrementalContext: IncrementalContext = {
     deferUsageSet: undefined,
     newErrors: new Map(),
@@ -103,8 +118,7 @@ export function completeInitialResult(
     incrementalDataRecords: [],
   };
 
-  const { schema, operation, fragments, variableValues, hideSuggestions } =
-    context.argsWithNewLabels;
+  const { schema, variableValues, hideSuggestions } = context.argsWithNewLabels;
 
   const rootType = schema.getRootType(operation.operation);
   invariant(rootType != null);
@@ -129,13 +143,15 @@ export function completeInitialResult(
     newDeferUsages,
   );
 
+  const pathSegmentRootNode = context.pathSegmentRootNode;
+
   const completed = completeObjectValue(
     context,
     groupedFieldSet,
     rootType,
     originalData,
     undefined,
-    '',
+    pathSegmentRootNode,
     incrementalContext,
     newDeferMap,
   );
@@ -145,7 +161,7 @@ export function completeInitialResult(
     rootType,
     originalData,
     undefined,
-    '',
+    pathSegmentRootNode,
     newGroupedFieldSets,
     incrementalContext,
     newDeferMap,
@@ -194,7 +210,7 @@ function completeValue(
   fieldDetailsList: ReadonlyArray<FieldDetails>,
   result: unknown,
   path: Path,
-  pathStr: string,
+  pathSegmentNode: PathSegmentNode | undefined,
   incrementalContext: IncrementalContext,
   deferMap: ReadonlyMap<DeferUsage, DeferredFragment> | undefined,
 ): unknown {
@@ -235,7 +251,7 @@ function completeValue(
       fieldDetailsList,
       result,
       path,
-      pathStr,
+      pathSegmentNode,
       incrementalContext,
       deferMap,
     );
@@ -282,7 +298,7 @@ function completeValue(
     runtimeType,
     result,
     path,
-    pathStr,
+    pathSegmentNode,
     incrementalContext,
     newDeferMap,
   );
@@ -292,7 +308,7 @@ function completeValue(
     runtimeType,
     result,
     path,
-    pathStr,
+    pathSegmentNode,
     newGroupedFieldSets,
     incrementalContext,
     newDeferMap,
@@ -353,7 +369,7 @@ function completeObjectValue(
   runtimeType: GraphQLObjectType,
   originalData: ObjMap<unknown>,
   path: Path | undefined,
-  pathStr: string,
+  pathSegmentNode: PathSegmentNode | undefined,
   incrementalContext: IncrementalContext,
   deferMap: ReadonlyMap<DeferUsage, DeferredFragment> | undefined,
 ): ObjMap<unknown> {
@@ -364,8 +380,11 @@ function completeObjectValue(
 
   const objectFieldTransformers =
     context.objectFieldTransformers[runtimeType.name];
-  const pathScopedFieldTransformers = context.pathScopedFieldTransformers;
+  const children = pathSegmentNode?.children;
   for (const [responseName, fieldDetailsList] of groupedFieldSet) {
+    if (responseName === context.prefix) {
+      continue;
+    }
     const fieldName = fieldDetailsList[0].node.name.value;
     const fieldDef = schema.getField(runtimeType, fieldName);
 
@@ -373,21 +392,21 @@ function completeObjectValue(
       const fieldType = fieldDef.type;
       const nullableType = getNullableType(fieldType);
       const fieldPath = addPath(path, responseName, nullableType === fieldType);
-      const fieldPathStr = pathStr + '.' + responseName;
+      const fieldPathSegmentNode = children?.[responseName];
       let completed = completeValue(
         context,
         nullableType,
         fieldDetailsList,
         originalData[responseName],
         fieldPath,
-        fieldPathStr,
+        fieldPathSegmentNode,
         incrementalContext,
         deferMap,
       );
 
       for (const fieldTransformer of [
         objectFieldTransformers?.[fieldName],
-        pathScopedFieldTransformers[fieldPathStr],
+        fieldPathSegmentNode?.fieldTransformer,
       ]) {
         if (fieldTransformer !== undefined) {
           completed = transformFieldValue(
@@ -444,7 +463,7 @@ function completeListValue(
   fieldDetailsList: ReadonlyArray<FieldDetails>,
   result: ReadonlyArray<unknown>,
   path: Path,
-  pathStr: string,
+  pathSegmentNode: PathSegmentNode | undefined,
   incrementalContext: IncrementalContext,
   deferMap: ReadonlyMap<DeferUsage, DeferredFragment> | undefined,
 ): Array<unknown> {
@@ -459,7 +478,7 @@ function completeListValue(
         fieldDetailsList,
         result,
         path,
-        pathStr,
+        pathSegmentNode,
         index,
         incrementalContext,
       );
@@ -473,7 +492,7 @@ function completeListValue(
       fieldDetailsList,
       result[index],
       addPath(path, index, nullableType === itemType),
-      pathStr,
+      pathSegmentNode,
       incrementalContext,
       deferMap,
     );
@@ -489,7 +508,7 @@ function completeListValue(
       fieldDetailsList,
       result,
       path,
-      pathStr,
+      pathSegmentNode,
       result.length,
       incrementalContext,
     );
@@ -579,7 +598,7 @@ function collectExecutionGroups(
   runtimeType: GraphQLObjectType,
   result: ObjMap<unknown>,
   path: Path | undefined,
-  pathStr: string,
+  pathSegmentNode: PathSegmentNode | undefined,
   newGroupedFieldSets: Map<DeferUsageSet, GroupedFieldSet>,
   incrementalContext: IncrementalContext,
   deferMap: ReadonlyMap<DeferUsage, DeferredFragment>,
@@ -601,7 +620,7 @@ function collectExecutionGroups(
           pendingExecutionGroup,
           result,
           path,
-          pathStr,
+          pathSegmentNode,
           groupedFieldSet,
           runtimeType,
           {
@@ -634,7 +653,7 @@ function executeExecutionGroup(
   pendingExecutionGroup: PendingExecutionGroup,
   result: ObjMap<unknown>,
   path: Path | undefined,
-  pathStr: string,
+  pathSegmentNode: PathSegmentNode | undefined,
   groupedFieldSet: GroupedFieldSet,
   runtimeType: GraphQLObjectType,
   incrementalContext: IncrementalContext,
@@ -646,7 +665,7 @@ function executeExecutionGroup(
     runtimeType,
     result,
     path,
-    pathStr,
+    pathSegmentNode,
     incrementalContext,
     deferMap,
   );
@@ -726,7 +745,7 @@ function maybeAddStream(
   fieldDetailsList: ReadonlyArray<FieldDetails>,
   result: ReadonlyArray<unknown>,
   path: Path,
-  pathStr: string,
+  pathSegmentNode: PathSegmentNode | undefined,
   nextIndex: number,
   incrementalContext: IncrementalContext,
 ): void {
@@ -759,7 +778,7 @@ function maybeAddStream(
           deferUsage: undefined,
         })),
         path,
-        pathStr,
+        pathSegmentNode,
         index,
         {
           deferUsageSet: undefined,
@@ -781,7 +800,7 @@ function executeStreamItem(
   itemType: GraphQLOutputType,
   fieldDetailsList: ReadonlyArray<FieldDetails>,
   path: Path,
-  pathStr: string,
+  pathSegmentNode: PathSegmentNode | undefined,
   index: number,
   incrementalContext: IncrementalContext,
 ): PromiseOrValue<StreamItemResult> {
@@ -793,7 +812,7 @@ function executeStreamItem(
     fieldDetailsList,
     result[index],
     itemPath,
-    pathStr,
+    pathSegmentNode,
     incrementalContext,
     undefined,
   );

@@ -19,7 +19,7 @@ import { promiseWithResolvers } from '../../jsutils/promiseWithResolvers.js';
 import type {
   LegacyInitialIncrementalExecutionResult,
   LegacySubsequentIncrementalExecutionResult,
-} from '../legacyExecuteIncrementally.js';
+} from '../getLegacyPayloadPublisher.js';
 import { legacyExecuteIncrementally as execute } from '../legacyExecuteIncrementally.js';
 
 const friendType = new GraphQLObjectType({

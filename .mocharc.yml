@@ -5,3 +5,4 @@ extension:
   - ts
 node-option:
   - 'loader=ts-node/esm/transpile-only'
+  - 'enable-source-maps'

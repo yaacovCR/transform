@@ -170,10 +170,7 @@ export class IncrementalGraph {
     this._onStreamItems(stream);
   }
 
-  terminateStream(
-    stream: Stream,
-    result: ReadonlyArray<GraphQLError> | null,
-  ): void {
+  terminateStream(stream: Stream, result?: ReadonlyArray<GraphQLError>): void {
     stream.streamItemQueue.push({ stream, result });
 
     // eslint-disable-next-line @typescript-eslint/no-floating-promises
@@ -365,7 +362,7 @@ export class IncrementalGraph {
         }
         /* c8 ignore stop */
         this._enqueue(
-          result === null
+          result === undefined
             ? { stream }
             : {
                 stream,

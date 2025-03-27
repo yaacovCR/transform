@@ -6,4 +6,4 @@
 
 export { buildTransformationContext } from './transform/buildTransformationContext.js';
 export { legacyExecuteIncrementally } from './transform/legacyExecuteIncrementally.js';
-export { transformResult } from './transform/transformResult.js';
+export { transform } from './transform/transform.js';
