@@ -158,7 +158,7 @@ export function completeInitialResult(
     newDeferMap,
   );
 
-  const maybePromise = extendObjects(incrementalContext, completed);
+  const maybePromise = extendObjects(incrementalContext, completed, undefined);
 
   if (isPromise(maybePromise)) {
     return maybePromise.then(() =>
@@ -197,7 +197,8 @@ function buildInitialResult(
 
 function extendObjects(
   incrementalContext: IncrementalContext,
-  completed: ObjMap<unknown>,
+  completed: unknown,
+  initialPath: Path | undefined,
 ): PromiseOrValue<void> {
   const promises: Array<Promise<void>> = [];
   for (const foundPathScopedObjectsForPath of Object.values(
@@ -206,11 +207,13 @@ function extendObjects(
     for (const foundPathScopedObjectsForType of Object.values(
       foundPathScopedObjectsForPath,
     )) {
+      invariant(isObjectLike(completed));
       extendObjectsOfType(
+        promises,
         incrementalContext,
         foundPathScopedObjectsForType,
         completed,
-        promises,
+        initialPath,
       );
     }
   }
@@ -220,10 +223,11 @@ function extendObjects(
 }
 
 function extendObjectsOfType(
+  promises: Array<Promise<void>>,
   incrementalContext: IncrementalContext,
   foundPathScopedObjects: FoundPathScopedObjects,
   completed: ObjMap<unknown>,
-  promises: Array<Promise<void>>,
+  initialPath: Path | undefined,
 ): void {
   const { objects, paths, extender, type, fieldDetailsList } =
     foundPathScopedObjects;
@@ -239,6 +243,7 @@ function extendObjectsOfType(
               fieldDetailsList,
               completed,
               paths,
+              initialPath,
             ),
           (rawError: unknown) =>
             nullObjects(
@@ -247,6 +252,7 @@ function extendObjectsOfType(
               fieldDetailsList,
               completed,
               paths,
+              initialPath,
             ),
         ),
       );
@@ -258,6 +264,7 @@ function extendObjectsOfType(
       fieldDetailsList,
       completed,
       paths,
+      initialPath,
     );
   } catch (rawError) {
     nullObjects(
@@ -266,20 +273,24 @@ function extendObjectsOfType(
       fieldDetailsList,
       completed,
       paths,
+      initialPath,
     );
   }
 }
 
+// eslint-disable-next-line @typescript-eslint/max-params
 function updateObjects(
   incrementalContext: IncrementalContext,
   results: ReadonlyArray<ExecutionResult>,
   fieldDetailsList: ReadonlyArray<FieldDetails>,
   completed: ObjMap<unknown>,
   paths: ReadonlyArray<Path>,
+  initialPath: Path | undefined,
 ): void {
   for (let i = 0; i < results.length; i++) {
     const result = results[i];
-    const pathArr = pathToArray(paths[i]);
+    const initialPathLength = pathToArray(initialPath).length;
+    const pathArr = pathToArray(paths[i]).slice(initialPathLength);
     const incompleteAtPath = getObjectAtPath(completed, pathArr);
     invariant(!Array.isArray(incompleteAtPath));
     const { data, errors } = result;
@@ -313,15 +324,18 @@ function updateObjects(
   }
 }
 
+// eslint-disable-next-line @typescript-eslint/max-params
 function nullObjects(
   incrementalContext: IncrementalContext,
   rawError: unknown,
   fieldDetailsList: ReadonlyArray<FieldDetails>,
   completed: ObjMap<unknown>,
-  foundPathScopedObjectPaths: ReadonlyArray<Path>,
+  paths: ReadonlyArray<Path>,
+  initialPath: Path | undefined,
 ): void {
-  for (const foundPathScopedObjectPath of foundPathScopedObjectPaths) {
-    const pathArr = pathToArray(foundPathScopedObjectPath);
+  const initialPathLength = pathToArray(initialPath).length;
+  for (const path of paths) {
+    const pathArr = pathToArray(path).slice(initialPathLength);
     const incompleteAtPath = getObjectAtPath(completed, pathArr);
     invariant(!Array.isArray(incompleteAtPath));
     const error = locatedError(
@@ -329,7 +343,7 @@ function nullObjects(
       fieldDetailsList.map((f) => f.node),
       pathArr,
     );
-    incrementalContext.newErrors.set(foundPathScopedObjectPath, error);
+    incrementalContext.newErrors.set(path, error);
   }
 }
 
@@ -807,6 +821,29 @@ function executeExecutionGroup(
     deferMap,
   );
 
+  const maybePromise = extendObjects(incrementalContext, completed, path);
+
+  if (isPromise(maybePromise)) {
+    return maybePromise.then(() =>
+      buildExecutionGroupResult(
+        incrementalContext,
+        completed,
+        pendingExecutionGroup,
+      ),
+    );
+  }
+  return buildExecutionGroupResult(
+    incrementalContext,
+    completed,
+    pendingExecutionGroup,
+  );
+}
+
+function buildExecutionGroupResult(
+  incrementalContext: IncrementalContext,
+  completed: ObjMap<unknown>,
+  pendingExecutionGroup: PendingExecutionGroup,
+): ExecutionGroupResult {
   const { newErrors, originalErrors, incrementalDataRecords } =
     incrementalContext;
 
@@ -923,19 +960,35 @@ function executeStreamItem(
   pathStr: string,
   index: number,
   incrementalContext: IncrementalContext,
-): StreamItemResult {
+): PromiseOrValue<StreamItemResult> {
   const nullableType = getNullableType(itemType);
+  const itemPath = addPath(path, index, nullableType === itemType);
   const completed = completeValue(
     context,
     nullableType,
     fieldDetailsList,
     result[index],
-    addPath(path, index, nullableType === itemType),
+    itemPath,
     pathStr,
     incrementalContext,
     undefined,
   );
 
+  const maybePromise = extendObjects(incrementalContext, completed, itemPath);
+
+  if (isPromise(maybePromise)) {
+    return maybePromise.then(() =>
+      buildStreamItemResult(incrementalContext, completed, path),
+    );
+  }
+  return buildStreamItemResult(incrementalContext, completed, path);
+}
+
+function buildStreamItemResult(
+  incrementalContext: IncrementalContext,
+  completed: unknown,
+  path: Path,
+): StreamItemResult {
   const { newErrors, originalErrors, incrementalDataRecords } =
     incrementalContext;
 

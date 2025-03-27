@@ -37,6 +37,7 @@ const queryType: GraphQLObjectType = new GraphQLObjectType({
     someListOfNonNullableItems: {
       type: new GraphQLList(new GraphQLNonNull(GraphQLString)),
     },
+    someListOfObjects: { type: new GraphQLList(queryType) },
   }),
 });
 
@@ -49,7 +50,7 @@ async function complete(
   rootValue: ObjMap<unknown>,
   transformers?: Transformers,
 ) {
-  const result = transformResult(
+  const result = await transformResult(
     {
       schema,
       document,
@@ -58,7 +59,6 @@ async function complete(
     transformers,
   );
 
-  invariant(!isPromise(result));
   invariant('initialResult' in result);
 
   const results: Array<
@@ -218,6 +218,38 @@ describe('transformResult', () => {
           incremental: [
             {
               items: ['a', 'b', 'c'],
+              id: '0',
+            },
+          ],
+          completed: [{ id: '0' }],
+          hasNext: false,
+        },
+      ]);
+    });
+
+    it('handles a stream of Objects', async () => {
+      const document = parse('{ someListOfObjects @stream { someField } }');
+      const result = await complete(document, {
+        someListOfObjects: [
+          { someField: 'a' },
+          { someField: 'b' },
+          { someField: 'c' },
+        ],
+      });
+      expectJSON(result).toDeepEqual([
+        {
+          data: { someListOfObjects: [] },
+          pending: [{ id: '0', path: ['someListOfObjects'] }],
+          hasNext: true,
+        },
+        {
+          incremental: [
+            {
+              items: [
+                { someField: 'a' },
+                { someField: 'b' },
+                { someField: 'c' },
+              ],
               id: '0',
             },
           ],
@@ -1476,6 +1508,163 @@ describe('transformResult', () => {
         });
       });
     });
+
+    describe('handles extension with deferred results', () => {
+      it('handles extension of initial result with a deferred payload', async () => {
+        const document = parse(`
+          query {
+            someObjectField {
+              ... @defer { someField }
+            }
+          }
+        `);
+        const result = await complete(
+          document,
+          { someObjectField: { someField: 'someField' } },
+          {
+            pathScopedObjectBatchExtenders: {
+              someObjectField: {
+                Query: (objects) =>
+                  objects.map(() => ({
+                    data: {
+                      extendedObjectField: { someChildField: 'someChildField' },
+                    },
+                  })),
+              },
+            },
+          },
+        );
+
+        expectJSON(result).toDeepEqual([
+          {
+            data: {
+              someObjectField: {
+                extendedObjectField: { someChildField: 'someChildField' },
+              },
+            },
+            pending: [{ id: '0', path: ['someObjectField'] }],
+            hasNext: true,
+          },
+          {
+            incremental: [
+              {
+                data: { someField: 'someField' },
+                id: '0',
+              },
+            ],
+            completed: [{ id: '0' }],
+            hasNext: false,
+          },
+        ]);
+      });
+
+      it('handles extension of deferred payload', async () => {
+        const document = parse(`
+        query {
+          someObjectField {
+            ... @defer { someObjectField { someField } }
+          }
+        }
+      `);
+        const result = await complete(
+          document,
+          { someObjectField: { someObjectField: { someField: 'someField' } } },
+          {
+            pathScopedObjectBatchExtenders: {
+              'someObjectField.someObjectField': {
+                Query: (objects) =>
+                  objects.map(() => ({
+                    data: {
+                      extendedObjectField: { someChildField: 'someChildField' },
+                    },
+                  })),
+              },
+            },
+          },
+        );
+
+        expectJSON(result).toDeepEqual([
+          {
+            data: {
+              someObjectField: {},
+            },
+            pending: [{ id: '0', path: ['someObjectField'] }],
+            hasNext: true,
+          },
+          {
+            incremental: [
+              {
+                data: {
+                  someObjectField: {
+                    someField: 'someField',
+                    extendedObjectField: { someChildField: 'someChildField' },
+                  },
+                },
+                id: '0',
+              },
+            ],
+            completed: [{ id: '0' }],
+            hasNext: false,
+          },
+        ]);
+      });
+    });
+
+    it('handles extension within a stream', async () => {
+      const document = parse('{ someListOfObjects @stream { someField } }');
+      const result = await complete(
+        document,
+        {
+          someListOfObjects: [
+            { someField: 'a' },
+            { someField: 'b' },
+            { someField: 'c' },
+          ],
+        },
+        {
+          pathScopedObjectBatchExtenders: {
+            someListOfObjects: {
+              Query: (objects) =>
+                objects.map(() => ({
+                  data: {
+                    extendedObjectField: { someChildField: 'someChildField' },
+                  },
+                })),
+            },
+          },
+        },
+      );
+      expectJSON(result).toDeepEqual([
+        {
+          data: { someListOfObjects: [] },
+          pending: [{ id: '0', path: ['someListOfObjects'] }],
+          hasNext: true,
+        },
+        {
+          incremental: [
+            {
+              items: [
+                {
+                  someField: 'a',
+                  extendedObjectField: { someChildField: 'someChildField' },
+                },
+                {
+                  someField: 'b',
+                  extendedObjectField: { someChildField: 'someChildField' },
+                },
+                {
+                  someField: 'c',
+                  extendedObjectField: { someChildField: 'someChildField' },
+                },
+              ],
+              id: '0',
+            },
+          ],
+          completed: [{ id: '0' }],
+          hasNext: false,
+        },
+      ]);
+    });
   });
 
   describe('handles asynchronously extending path-scoped object values', () => {
@@ -1783,6 +1972,193 @@ describe('transformResult', () => {
           ],
         });
       });
+    });
+
+    describe('handles extension with deferred results', () => {
+      it('handles extension of initial result with a deferred payload', async () => {
+        const document = parse(`
+          query {
+            someObjectField {
+              ... @defer { someField }
+            }
+          }
+        `);
+        const result = await complete(
+          document,
+          { someObjectField: { someField: 'someField' } },
+          {
+            pathScopedObjectBatchExtenders: {
+              someObjectField: {
+                Query: (objects) =>
+                  Promise.resolve(
+                    objects.map(() => ({
+                      data: {
+                        extendedObjectField: {
+                          someChildField: 'someChildField',
+                        },
+                      },
+                    })),
+                  ),
+              },
+            },
+          },
+        );
+
+        expectJSON(result).toDeepEqual([
+          {
+            data: {
+              someObjectField: {
+                extendedObjectField: { someChildField: 'someChildField' },
+              },
+            },
+            pending: [{ id: '0', path: ['someObjectField'] }],
+            hasNext: true,
+          },
+          {
+            incremental: [
+              {
+                data: { someField: 'someField' },
+                id: '0',
+              },
+            ],
+            completed: [{ id: '0' }],
+            hasNext: false,
+          },
+        ]);
+      });
+
+      it('handles extension of deferred payload', async () => {
+        const document = parse(`
+          query {
+            someObjectField {
+              ... @defer { someObjectField { someField } }
+            }
+          }
+        `);
+        const result = await complete(
+          document,
+          { someObjectField: { someObjectField: { someField: 'someField' } } },
+          {
+            pathScopedObjectBatchExtenders: {
+              'someObjectField.someObjectField': {
+                Query: (objects) =>
+                  Promise.resolve(
+                    objects.map(() => ({
+                      data: {
+                        extendedObjectField: {
+                          someChildField: 'someChildField',
+                        },
+                      },
+                    })),
+                  ),
+              },
+            },
+          },
+        );
+
+        expectJSON(result).toDeepEqual([
+          {
+            data: {
+              someObjectField: {},
+            },
+            pending: [{ id: '0', path: ['someObjectField'] }],
+            hasNext: true,
+          },
+          {
+            incremental: [
+              {
+                data: {
+                  someObjectField: {
+                    someField: 'someField',
+                    extendedObjectField: { someChildField: 'someChildField' },
+                  },
+                },
+                id: '0',
+              },
+            ],
+            completed: [{ id: '0' }],
+            hasNext: false,
+          },
+        ]);
+      });
+    });
+
+    it('handles extension within a stream', async () => {
+      const document = parse('{ someListOfObjects @stream { someField } }');
+      const result = await complete(
+        document,
+        {
+          someListOfObjects: [
+            { someField: 'a' },
+            { someField: 'b' },
+            { someField: 'c' },
+          ],
+        },
+        {
+          pathScopedObjectBatchExtenders: {
+            someListOfObjects: {
+              Query: (objects) =>
+                Promise.resolve(
+                  objects.map(() => ({
+                    data: {
+                      extendedObjectField: { someChildField: 'someChildField' },
+                    },
+                  })),
+                ),
+            },
+          },
+        },
+      );
+      expectJSON(result).toDeepEqual([
+        {
+          data: { someListOfObjects: [] },
+          pending: [{ id: '0', path: ['someListOfObjects'] }],
+          hasNext: true,
+        },
+        {
+          incremental: [
+            {
+              items: [
+                {
+                  someField: 'a',
+                  extendedObjectField: { someChildField: 'someChildField' },
+                },
+              ],
+              id: '0',
+            },
+          ],
+          hasNext: true,
+        },
+        {
+          incremental: [
+            {
+              items: [
+                {
+                  someField: 'b',
+                  extendedObjectField: { someChildField: 'someChildField' },
+                },
+              ],
+              id: '0',
+            },
+          ],
+          hasNext: true,
+        },
+        {
+          incremental: [
+            {
+              items: [
+                {
+                  someField: 'c',
+                  extendedObjectField: { someChildField: 'someChildField' },
+                },
+              ],
+              id: '0',
+            },
+          ],
+          completed: [{ id: '0' }],
+          hasNext: false,
+        },
+      ]);
     });
   });
 });

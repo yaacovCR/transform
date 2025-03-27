@@ -123,9 +123,10 @@ function transformOriginalResult<TSubsequent, TIncremental>(
       if (incrementalDataRecords.length === 0) {
         const { data, errors } = resolved;
         return errors.length === 0 ? { data } : { errors, data };
-      }
+      } /* c8 ignore start */
+      // TODO: add test case for this branch
       return buildIncrementalResponse(originalData, resolved, payloadPublisher);
-    });
+    }); /* c8 ignore stop */
   }
 
   const { incrementalDataRecords } = completed;
