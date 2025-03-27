@@ -90,8 +90,7 @@ function transformOriginalResult<TSubsequent, TIncremental>(
 
     const completed = completeInitialResult(context, data);
 
-    // TODO: add test case
-    return isPromise(completed) /* c8 ignore start */
+    return isPromise(completed)
       ? completed.then((resolved) =>
           buildIncrementalResponse(
             data,
@@ -124,10 +123,9 @@ function transformOriginalResult<TSubsequent, TIncremental>(
       if (incrementalDataRecords.length === 0) {
         const { data, errors } = resolved;
         return errors.length === 0 ? { data } : { errors, data };
-      } /* c8 ignore start */
-      // TODO: add test case
+      }
       return buildIncrementalResponse(originalData, resolved, payloadPublisher);
-    }); /* c8 ignore start */
+    });
   }
 
   const { incrementalDataRecords } = completed;

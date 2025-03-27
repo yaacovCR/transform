@@ -1,5 +1,5 @@
 import type {
-  GraphQLError,
+  ExecutionResult,
   GraphQLField,
   GraphQLLeafType,
   GraphQLNullableOutputType,
@@ -10,6 +10,7 @@ import type {
 import {
   getDirectiveValues,
   getNullableType,
+  GraphQLError,
   GraphQLStreamDirective,
   isLeafType,
   isListType,
@@ -31,6 +32,7 @@ import {
 import { BoxedPromiseOrValue } from '../jsutils/BoxedPromiseOrValue.js';
 import { invariant } from '../jsutils/invariant.js';
 import { isObjectLike } from '../jsutils/isObjectLike.js';
+import { isPromise } from '../jsutils/isPromise.js';
 import { memoize3 } from '../jsutils/memoize3.js';
 import type { ObjMap } from '../jsutils/ObjMap.js';
 import type { Path } from '../jsutils/Path.js';
@@ -41,10 +43,12 @@ import type { DeferUsageSet, ExecutionPlan } from './buildExecutionPlan.js';
 import type {
   FieldTransformer,
   LeafTransformer,
+  ObjectBatchExtender,
   TransformationContext,
 } from './buildTransformationContext.js';
 import { EmbeddedErrors } from './EmbeddedError.js';
 import { filter } from './filter.js';
+import { getObjectAtPath } from './getObjectAtPath.js';
 import type {
   DeferredFragment,
   ExecutionGroupResult,
@@ -57,8 +61,17 @@ import type {
 interface IncrementalContext {
   newErrors: Map<Path | undefined, GraphQLError>;
   originalErrors: Array<GraphQLError>;
+  foundPathScopedObjects: ObjMap<ObjMap<FoundPathScopedObjects>>;
   incrementalDataRecords: Array<IncrementalDataRecord>;
   deferUsageSet: DeferUsageSet | undefined;
+}
+
+interface FoundPathScopedObjects {
+  objects: Array<ObjMap<unknown>>;
+  paths: Array<Path>;
+  extender: ObjectBatchExtender;
+  type: GraphQLObjectType;
+  fieldDetailsList: ReadonlyArray<FieldDetails>;
 }
 
 interface StreamUsage {
@@ -96,6 +109,7 @@ export function completeInitialResult(
   const incrementalContext: IncrementalContext = {
     newErrors: new Map(),
     originalErrors: [],
+    foundPathScopedObjects: Object.create(null),
     incrementalDataRecords: [],
     deferUsageSet: undefined,
   };
@@ -144,6 +158,24 @@ export function completeInitialResult(
     newDeferMap,
   );
 
+  const maybePromise = extendObjects(incrementalContext, completed);
+
+  if (isPromise(maybePromise)) {
+    return maybePromise.then(() =>
+      buildInitialResult(incrementalContext, completed),
+    );
+  }
+  return buildInitialResult(incrementalContext, completed);
+}
+
+function buildInitialResult(
+  incrementalContext: IncrementalContext,
+  completed: ObjMap<unknown>,
+): {
+  data: ObjMap<unknown>;
+  errors: ReadonlyArray<GraphQLError>;
+  incrementalDataRecords: ReadonlyArray<IncrementalDataRecord>;
+} {
   const { newErrors, originalErrors, incrementalDataRecords } =
     incrementalContext;
 
@@ -154,11 +186,151 @@ export function completeInitialResult(
     incrementalDataRecords,
   );
 
+  const errors = [...originalErrors, ...newErrors.values()];
+
   return {
     data: filteredData,
-    errors: [...originalErrors, ...newErrors.values()],
+    errors,
     incrementalDataRecords: filteredRecords,
   };
+}
+
+function extendObjects(
+  incrementalContext: IncrementalContext,
+  completed: ObjMap<unknown>,
+): PromiseOrValue<void> {
+  const promises: Array<Promise<void>> = [];
+  for (const foundPathScopedObjectsForPath of Object.values(
+    incrementalContext.foundPathScopedObjects,
+  )) {
+    for (const foundPathScopedObjectsForType of Object.values(
+      foundPathScopedObjectsForPath,
+    )) {
+      extendObjectsOfType(
+        incrementalContext,
+        foundPathScopedObjectsForType,
+        completed,
+        promises,
+      );
+    }
+  }
+  if (promises.length > 0) {
+    return Promise.all(promises) as unknown as PromiseOrValue<void>;
+  }
+}
+
+function extendObjectsOfType(
+  incrementalContext: IncrementalContext,
+  foundPathScopedObjects: FoundPathScopedObjects,
+  completed: ObjMap<unknown>,
+  promises: Array<Promise<void>>,
+): void {
+  const { objects, paths, extender, type, fieldDetailsList } =
+    foundPathScopedObjects;
+  try {
+    const results = extender(objects, type, fieldDetailsList);
+    if (isPromise(results)) {
+      promises.push(
+        results.then(
+          (resolved) =>
+            updateObjects(
+              incrementalContext,
+              resolved,
+              fieldDetailsList,
+              completed,
+              paths,
+            ),
+          (rawError: unknown) =>
+            nullObjects(
+              incrementalContext,
+              rawError,
+              fieldDetailsList,
+              completed,
+              paths,
+            ),
+        ),
+      );
+      return;
+    }
+    updateObjects(
+      incrementalContext,
+      results,
+      fieldDetailsList,
+      completed,
+      paths,
+    );
+  } catch (rawError) {
+    nullObjects(
+      incrementalContext,
+      rawError,
+      fieldDetailsList,
+      completed,
+      paths,
+    );
+  }
+}
+
+function updateObjects(
+  incrementalContext: IncrementalContext,
+  results: ReadonlyArray<ExecutionResult>,
+  fieldDetailsList: ReadonlyArray<FieldDetails>,
+  completed: ObjMap<unknown>,
+  paths: ReadonlyArray<Path>,
+): void {
+  for (let i = 0; i < results.length; i++) {
+    const result = results[i];
+    const pathArr = pathToArray(paths[i]);
+    const incompleteAtPath = getObjectAtPath(completed, pathArr);
+    invariant(!Array.isArray(incompleteAtPath));
+    const { data, errors } = result;
+    if (data) {
+      for (const [key, value] of Object.entries(data)) {
+        incompleteAtPath[key] = value;
+      }
+      if (errors) {
+        incrementalContext.originalErrors.push(
+          ...errors.map(
+            (error) =>
+              new GraphQLError(error.message, {
+                ...error,
+                path: error.path ? [...pathArr, ...error.path] : pathArr,
+              }),
+          ),
+        );
+      }
+    } else {
+      invariant(errors !== undefined);
+      const error = locatedError(
+        new AggregateError(
+          errors,
+          'An error occurred while resolving a batched object.',
+        ),
+        fieldDetailsList.map((f) => f.node),
+        pathArr,
+      );
+      incrementalContext.newErrors.set(paths[i], error);
+    }
+  }
+}
+
+function nullObjects(
+  incrementalContext: IncrementalContext,
+  rawError: unknown,
+  fieldDetailsList: ReadonlyArray<FieldDetails>,
+  completed: ObjMap<unknown>,
+  foundPathScopedObjectPaths: ReadonlyArray<Path>,
+): void {
+  for (const foundPathScopedObjectPath of foundPathScopedObjectPaths) {
+    const pathArr = pathToArray(foundPathScopedObjectPath);
+    const incompleteAtPath = getObjectAtPath(completed, pathArr);
+    invariant(!Array.isArray(incompleteAtPath));
+    const error = locatedError(
+      rawError,
+      fieldDetailsList.map((f) => f.node),
+      pathArr,
+    );
+    incrementalContext.newErrors.set(foundPathScopedObjectPath, error);
+  }
 }
 
 // eslint-disable-next-line @typescript-eslint/max-params
@@ -265,6 +437,26 @@ function completeValue(
     incrementalContext,
     newDeferMap,
   );
+
+  const foundPathScopedObjects = incrementalContext.foundPathScopedObjects;
+  const extender = context.pathScopedObjectBatchExtenders[pathStr]?.[typeName];
+  if (extender !== undefined) {
+    let foundPathScopedObjectsForPath = foundPathScopedObjects[pathStr];
+    foundPathScopedObjectsForPath ??= foundPathScopedObjects[pathStr] =
+      Object.create(null);
+    let foundPathScopedObjectsForType = foundPathScopedObjectsForPath[typeName];
+    foundPathScopedObjectsForType ??= foundPathScopedObjectsForPath[typeName] =
+      {
+        objects: [],
+        paths: [],
+        extender,
+        type: runtimeType,
+        fieldDetailsList,
+      };
+    const { objects, paths } = foundPathScopedObjectsForType;
+    objects.push(result);
+    paths.push(path);
+  }
 
   return completed;
 }
@@ -571,6 +763,7 @@ function collectExecutionGroups(
           {
             newErrors: new Map(),
             originalErrors: [],
+            foundPathScopedObjects: Object.create(null),
             incrementalDataRecords: [],
             deferUsageSet,
           },
@@ -710,6 +903,7 @@ function maybeAddStream(
         {
           newErrors: new Map(),
           originalErrors: [],
+          foundPathScopedObjects: Object.create(null),
           incrementalDataRecords: [],
           deferUsageSet: undefined,
         },

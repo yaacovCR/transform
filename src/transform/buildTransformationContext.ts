@@ -1,9 +1,12 @@
 import type {
+  ExecutionResult,
   GraphQLField,
   GraphQLLeafType,
+  GraphQLObjectType,
   ValidatedExecutionArgs,
 } from 'graphql';
 import type {
+  FieldDetails,
   GroupedFieldSet,
   // eslint-disable-next-line n/no-missing-import
 } from 'graphql/execution/collectFields.js';
@@ -11,6 +14,7 @@ import type {
 import { mapKey } from '../jsutils/mapKey.js';
 import type { ObjMap } from '../jsutils/ObjMap.js';
 import type { Path } from '../jsutils/Path.js';
+import type { PromiseOrValue } from '../jsutils/PromiseOrValue.js';
 
 import { addNewLabels } from './addNewLabels.js';
 import type { DeferUsageSet, ExecutionPlan } from './buildExecutionPlan.js';
@@ -40,10 +44,19 @@ type LeafTransformers = ObjMap<LeafTransformer>;
 
 type PathScopedFieldTransformers = ObjMap<FieldTransformer>;
 
+type PathScopedObjectBatchExtenders = ObjMap<ObjMap<ObjectBatchExtender>>;
+
+export type ObjectBatchExtender = (
+  objects: ReadonlyArray<ObjMap<unknown>>,
+  type: GraphQLObjectType,
+  fieldDetailsList: ReadonlyArray<FieldDetails>,
+) => PromiseOrValue<ReadonlyArray<ExecutionResult>>;
+
 export interface Transformers {
   pathScopedFieldTransformers?: PathScopedFieldTransformers;
   objectFieldTransformers?: ObjectFieldTransformers;
   leafTransformers?: LeafTransformers;
+  pathScopedObjectBatchExtenders?: PathScopedObjectBatchExtenders;
 }
 
 export interface TransformationContext {
@@ -52,6 +65,7 @@ export interface TransformationContext {
   pathScopedFieldTransformers: PathScopedFieldTransformers;
   objectFieldTransformers: ObjectFieldTransformers;
   leafTransformers: LeafTransformers;
+  pathScopedObjectBatchExtenders: PathScopedObjectBatchExtenders;
   executionPlanBuilder: ExecutionPlanBuilder;
   prefix: string;
 }
@@ -71,19 +85,25 @@ export function buildTransformationContext(
     objectFieldTransformers = {},
     pathScopedFieldTransformers = {},
     leafTransformers = {},
+    pathScopedObjectBatchExtenders = {},
   } = transformers;
 
   return {
     argsWithNewLabels,
     originalLabels,
     objectFieldTransformers,
-    pathScopedFieldTransformers: mapKey(
-      pathScopedFieldTransformers,
-      //by modifying the keys, identical pathStr logic can be utilized for root fields and subfields
-      (key) => `.${key}`,
-    ),
+    pathScopedFieldTransformers: prefixKeys(pathScopedFieldTransformers),
     leafTransformers,
+    pathScopedObjectBatchExtenders: prefixKeys(pathScopedObjectBatchExtenders),
     executionPlanBuilder,
     prefix,
   };
+}
+
+function prefixKeys<T>(obj: ObjMap<T>): ObjMap<T> {
+  return mapKey(
+    obj,
+    //by modifying the keys, identical pathStr logic can be utilized for root fields and subfields
+    (key) => `.${key}`,
+  );
 }

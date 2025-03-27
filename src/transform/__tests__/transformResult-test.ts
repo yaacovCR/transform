@@ -1,9 +1,11 @@
+import { expect } from 'chai';
 import type {
   DocumentNode,
   InitialIncrementalExecutionResult,
   SubsequentIncrementalExecutionResult,
 } from 'graphql';
 import {
+  GraphQLError,
   GraphQLList,
   GraphQLNonNull,
   GraphQLObjectType,
@@ -30,6 +32,7 @@ const queryType: GraphQLObjectType = new GraphQLObjectType({
     anotherField: { type: GraphQLString },
     nonNullableField: { type: new GraphQLNonNull(GraphQLString) },
     someObjectField: { type: queryType },
+    nonNullableObjectField: { type: new GraphQLNonNull(queryType) },
     someListField: { type: new GraphQLList(GraphQLString) },
     someListOfNonNullableItems: {
       type: new GraphQLList(new GraphQLNonNull(GraphQLString)),
@@ -1169,6 +1172,616 @@ describe('transformResult', () => {
             hasNext: false,
           },
         ]);
+      });
+    });
+  });
+
+  describe('handles synchronously extending path-scoped object values', () => {
+    describe('handles extending path-scoped object values', () => {
+      it('handles transformation', () => {
+        const result = transformResult(
+          {
+            schema,
+            document: parse('{ someObjectField { someField } }'),
+            rootValue: { someObjectField: { someField: 'someField' } },
+          },
+          {
+            pathScopedObjectBatchExtenders: {
+              someObjectField: {
+                Query: (objects) =>
+                  objects.map(() => ({
+                    data: { extendedField: 'extendedField' },
+                  })),
+              },
+            },
+          },
+        );
+
+        expectJSON(result).toDeepEqual({
+          data: {
+            someObjectField: {
+              someField: 'someField',
+              extendedField: 'extendedField',
+            },
+          },
+        });
+      });
+
+      it('handles transformation returning null', () => {
+        const originalError = new GraphQLError('Oops');
+        const result = transformResult(
+          {
+            schema,
+            document: parse('{ someObjectField { someField } }'),
+            rootValue: { someObjectField: { someField: 'someField' } },
+          },
+          {
+            pathScopedObjectBatchExtenders: {
+              someObjectField: {
+                Query: (objects) =>
+                  objects.map(() => ({
+                    data: null,
+                    errors: [originalError],
+                  })),
+              },
+            },
+          },
+        );
+
+        expectJSON(result).toDeepEqual({
+          data: {
+            someObjectField: null,
+          },
+          errors: [
+            {
+              message: 'An error occurred while resolving a batched object.',
+              path: ['someObjectField'],
+              locations: [{ line: 1, column: 3 }],
+            },
+          ],
+        });
+
+        invariant(!isPromise(result));
+        invariant(!('initialResult' in result));
+
+        const error = result.errors?.[0];
+
+        invariant(error instanceof GraphQLError);
+        invariant(error.originalError instanceof AggregateError);
+
+        expect(error.originalError.errors[0]).to.equal(originalError);
+      });
+
+      it('handles transformation throwing an error', () => {
+        const result = transformResult(
+          {
+            schema,
+            document: parse('{ someObjectField { someField } }'),
+            rootValue: { someObjectField: { someField: 'someField' } },
+          },
+          {
+            pathScopedObjectBatchExtenders: {
+              someObjectField: {
+                Query: () => {
+                  throw new Error('Oops');
+                },
+              },
+            },
+          },
+        );
+
+        expectJSON(result).toDeepEqual({
+          data: {
+            someObjectField: null,
+          },
+          errors: [
+            {
+              message: 'Oops',
+              path: ['someObjectField'],
+              locations: [{ line: 1, column: 3 }],
+            },
+          ],
+        });
+      });
+
+      it('handles transformation returning an error', () => {
+        const result = transformResult(
+          {
+            schema,
+            document: parse('{ someObjectField { someField } }'),
+            rootValue: { someObjectField: { someField: 'someField' } },
+          },
+          {
+            pathScopedObjectBatchExtenders: {
+              someObjectField: {
+                Query: (objects) =>
+                  objects.map(() => ({
+                    data: { extendedObjectField: { someChildField: null } },
+                    errors: [
+                      new GraphQLError('Oops', {
+                        path: ['extendedObjectField', 'someChildField'],
+                      }),
+                    ],
+                  })),
+              },
+            },
+          },
+        );
+
+        expectJSON(result).toDeepEqual({
+          data: {
+            someObjectField: {
+              someField: 'someField',
+              extendedObjectField: { someChildField: null },
+            },
+          },
+          errors: [
+            {
+              message: 'Oops',
+              path: [
+                'someObjectField',
+                'extendedObjectField',
+                'someChildField',
+              ],
+            },
+          ],
+        });
+      });
+    });
+
+    describe('handles extending non-nullable path-scoped object values', () => {
+      it('handles transformation', () => {
+        const result = transformResult(
+          {
+            schema,
+            document: parse('{ nonNullableObjectField { someField } }'),
+            rootValue: { nonNullableObjectField: { someField: 'someField' } },
+          },
+          {
+            pathScopedObjectBatchExtenders: {
+              nonNullableObjectField: {
+                Query: (objects) =>
+                  objects.map(() => ({
+                    data: { extendedField: 'extendedField' },
+                  })),
+              },
+            },
+          },
+        );
+
+        expectJSON(result).toDeepEqual({
+          data: {
+            nonNullableObjectField: {
+              someField: 'someField',
+              extendedField: 'extendedField',
+            },
+          },
+        });
+      });
+
+      it('handles transformation returning null', () => {
+        const originalError = new GraphQLError('Oops');
+        const result = transformResult(
+          {
+            schema,
+            document: parse('{ nonNullableObjectField { someField } }'),
+            rootValue: { nonNullableObjectField: { someField: 'someField' } },
+          },
+          {
+            pathScopedObjectBatchExtenders: {
+              nonNullableObjectField: {
+                Query: (objects) =>
+                  objects.map(() => ({
+                    data: null,
+                    errors: [originalError],
+                  })),
+              },
+            },
+          },
+        );
+
+        expectJSON(result).toDeepEqual({
+          data: null,
+          errors: [
+            {
+              message: 'An error occurred while resolving a batched object.',
+              path: ['nonNullableObjectField'],
+              locations: [{ line: 1, column: 3 }],
+            },
+          ],
+        });
+
+        invariant(!isPromise(result));
+        invariant(!('initialResult' in result));
+
+        const error = result.errors?.[0];
+
+        invariant(error instanceof GraphQLError);
+        invariant(error.originalError instanceof AggregateError);
+
+        expect(error.originalError.errors[0]).to.equal(originalError);
+      });
+
+      it('handles transformation throwing an error', () => {
+        const result = transformResult(
+          {
+            schema,
+            document: parse('{ nonNullableObjectField { someField } }'),
+            rootValue: { nonNullableObjectField: { someField: 'someField' } },
+          },
+          {
+            pathScopedObjectBatchExtenders: {
+              nonNullableObjectField: {
+                Query: () => {
+                  throw new Error('Oops');
+                },
+              },
+            },
+          },
+        );
+
+        expectJSON(result).toDeepEqual({
+          data: null,
+          errors: [
+            {
+              message: 'Oops',
+              path: ['nonNullableObjectField'],
+              locations: [{ line: 1, column: 3 }],
+            },
+          ],
+        });
+      });
+
+      it('handles transformation returning an error', () => {
+        const result = transformResult(
+          {
+            schema,
+            document: parse('{ nonNullableObjectField { someField } }'),
+            rootValue: { nonNullableObjectField: { someField: 'someField' } },
+          },
+          {
+            pathScopedObjectBatchExtenders: {
+              nonNullableObjectField: {
+                Query: (objects) =>
+                  objects.map(() => ({
+                    data: { extendedObjectField: { someChildField: null } },
+                    errors: [
+                      new GraphQLError('Oops', {
+                        path: ['extendedObjectField', 'someChildField'],
+                      }),
+                    ],
+                  })),
+              },
+            },
+          },
+        );
+
+        expectJSON(result).toDeepEqual({
+          data: {
+            nonNullableObjectField: {
+              someField: 'someField',
+              extendedObjectField: { someChildField: null },
+            },
+          },
+          errors: [
+            {
+              message: 'Oops',
+              path: [
+                'nonNullableObjectField',
+                'extendedObjectField',
+                'someChildField',
+              ],
+            },
+          ],
+        });
+      });
+    });
+  });
+
+  describe('handles asynchronously extending path-scoped object values', () => {
+    describe('handles extending path-scoped object values', () => {
+      it('handles transformation', async () => {
+        const result = await transformResult(
+          {
+            schema,
+            document: parse('{ someObjectField { someField } }'),
+            rootValue: { someObjectField: { someField: 'someField' } },
+          },
+          {
+            pathScopedObjectBatchExtenders: {
+              someObjectField: {
+                Query: (objects) =>
+                  Promise.resolve(
+                    objects.map(() => ({
+                      data: { extendedField: 'extendedField' },
+                    })),
+                  ),
+              },
+            },
+          },
+        );
+
+        expectJSON(result).toDeepEqual({
+          data: {
+            someObjectField: {
+              someField: 'someField',
+              extendedField: 'extendedField',
+            },
+          },
+        });
+      });
+
+      it('handles transformation returning null', async () => {
+        const originalError = new GraphQLError('Oops');
+        const result = await transformResult(
+          {
+            schema,
+            document: parse('{ someObjectField { someField } }'),
+            rootValue: { someObjectField: { someField: 'someField' } },
+          },
+          {
+            pathScopedObjectBatchExtenders: {
+              someObjectField: {
+                Query: (objects) =>
+                  Promise.resolve(
+                    objects.map(() => ({
+                      data: null,
+                      errors: [originalError],
+                    })),
+                  ),
+              },
+            },
+          },
+        );
+
+        expectJSON(result).toDeepEqual({
+          data: {
+            someObjectField: null,
+          },
+          errors: [
+            {
+              message: 'An error occurred while resolving a batched object.',
+              path: ['someObjectField'],
+              locations: [{ line: 1, column: 3 }],
+            },
+          ],
+        });
+
+        invariant(!('initialResult' in result));
+
+        const error = result.errors?.[0];
+
+        invariant(error instanceof GraphQLError);
+        invariant(error.originalError instanceof AggregateError);
+
+        expect(error.originalError.errors[0]).to.equal(originalError);
+      });
+
+      it('handles transformation throwing an error', async () => {
+        const result = await transformResult(
+          {
+            schema,
+            document: parse('{ someObjectField { someField } }'),
+            rootValue: { someObjectField: { someField: 'someField' } },
+          },
+          {
+            pathScopedObjectBatchExtenders: {
+              someObjectField: {
+                Query: () => Promise.reject(new Error('Oops')),
+              },
+            },
+          },
+        );
+
+        expectJSON(result).toDeepEqual({
+          data: {
+            someObjectField: null,
+          },
+          errors: [
+            {
+              message: 'Oops',
+              path: ['someObjectField'],
+              locations: [{ line: 1, column: 3 }],
+            },
+          ],
+        });
+      });
+
+      it('handles transformation returning an error', async () => {
+        const result = await transformResult(
+          {
+            schema,
+            document: parse('{ someObjectField { someField } }'),
+            rootValue: { someObjectField: { someField: 'someField' } },
+          },
+          {
+            pathScopedObjectBatchExtenders: {
+              someObjectField: {
+                Query: (objects) =>
+                  Promise.resolve(
+                    objects.map(() => ({
+                      data: { extendedObjectField: { someChildField: null } },
+                      errors: [
+                        new GraphQLError('Oops', {
+                          path: ['extendedObjectField', 'someChildField'],
+                        }),
+                      ],
+                    })),
+                  ),
+              },
+            },
+          },
+        );
+
+        expectJSON(result).toDeepEqual({
+          data: {
+            someObjectField: {
+              someField: 'someField',
+              extendedObjectField: { someChildField: null },
+            },
+          },
+          errors: [
+            {
+              message: 'Oops',
+              path: [
+                'someObjectField',
+                'extendedObjectField',
+                'someChildField',
+              ],
+            },
+          ],
+        });
+      });
+    });
+
+    describe('handles extending non-nullable path-scoped object values', () => {
+      it('handles transformation', async () => {
+        const result = await transformResult(
+          {
+            schema,
+            document: parse('{ nonNullableObjectField { someField } }'),
+            rootValue: { nonNullableObjectField: { someField: 'someField' } },
+          },
+          {
+            pathScopedObjectBatchExtenders: {
+              nonNullableObjectField: {
+                Query: (objects) =>
+                  Promise.resolve(
+                    objects.map(() => ({
+                      data: { extendedField: 'extendedField' },
+                    })),
+                  ),
+              },
+            },
+          },
+        );
+
+        expectJSON(result).toDeepEqual({
+          data: {
+            nonNullableObjectField: {
+              someField: 'someField',
+              extendedField: 'extendedField',
+            },
+          },
+        });
+      });
+
+      it('handles transformation returning null', async () => {
+        const originalError = new GraphQLError('Oops');
+        const result = await transformResult(
+          {
+            schema,
+            document: parse('{ nonNullableObjectField { someField } }'),
+            rootValue: { nonNullableObjectField: { someField: 'someField' } },
+          },
+          {
+            pathScopedObjectBatchExtenders: {
+              nonNullableObjectField: {
+                Query: (objects) =>
+                  Promise.resolve(
+                    objects.map(() => ({
+                      data: null,
+                      errors: [originalError],
+                    })),
+                  ),
+              },
+            },
+          },
+        );
+
+        expectJSON(result).toDeepEqual({
+          data: null,
+          errors: [
+            {
+              message: 'An error occurred while resolving a batched object.',
+              path: ['nonNullableObjectField'],
+              locations: [{ line: 1, column: 3 }],
+            },
+          ],
+        });
+
+        invariant(!('initialResult' in result));
+
+        const error = result.errors?.[0];
+
+        invariant(error instanceof GraphQLError);
+        invariant(error.originalError instanceof AggregateError);
+
+        expect(error.originalError.errors[0]).to.equal(originalError);
+      });
+
+      it('handles transformation throwing an error', async () => {
+        const result = await transformResult(
+          {
+            schema,
+            document: parse('{ nonNullableObjectField { someField } }'),
+            rootValue: { nonNullableObjectField: { someField: 'someField' } },
+          },
+          {
+            pathScopedObjectBatchExtenders: {
+              nonNullableObjectField: {
+                Query: () => Promise.reject(new Error('Oops')),
+              },
+            },
+          },
+        );
+
+        expectJSON(result).toDeepEqual({
+          data: null,
+          errors: [
+            {
+              message: 'Oops',
+              path: ['nonNullableObjectField'],
+              locations: [{ line: 1, column: 3 }],
+            },
+          ],
+        });
+      });
+
+      it('handles transformation returning an error', async () => {
+        const result = await transformResult(
+          {
+            schema,
+            document: parse('{ nonNullableObjectField { someField } }'),
+            rootValue: { nonNullableObjectField: { someField: 'someField' } },
+          },
+          {
+            pathScopedObjectBatchExtenders: {
+              nonNullableObjectField: {
+                Query: (objects) =>
+                  Promise.resolve(
+                    objects.map(() => ({
+                      data: { extendedObjectField: { someChildField: null } },
+                      errors: [
+                        new GraphQLError('Oops', {
+                          path: ['extendedObjectField', 'someChildField'],
+                        }),
+                      ],
+                    })),
+                  ),
+              },
+            },
+          },
+        );
+
+        expectJSON(result).toDeepEqual({
+          data: {
+            nonNullableObjectField: {
+              someField: 'someField',
+              extendedObjectField: { someChildField: null },
+            },
+          },
+          errors: [
+            {
+              message: 'Oops',
+              path: [
+                'nonNullableObjectField',
+                'extendedObjectField',
+                'someChildField',
+              ],
+            },
+          ],
+        });
       });
     });
   });
