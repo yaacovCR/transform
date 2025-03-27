@@ -330,7 +330,7 @@ function updateObjects(
       const error = locatedError(
         new AggregateError(
           errors,
-          'An error occurred while resolving a batched object.',
+          'Fatal GraphQL error(s) occurred while resolving a batched object.',
         ),
         fieldDetailsList.map((f) => f.node),
         pathArr,
