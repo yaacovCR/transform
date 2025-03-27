@@ -282,7 +282,7 @@ export class IncrementalPublisher<TSubsequent, TIncremental> {
     this._incrementalGraph.completeStreamItems(newRootNode);
 
     // TODO: add test case - original executor completes stream early normally
-    /* c8 ignore next 4 */
+    /* c8 ignore next 3 */
     if (pendingResultsByPath === undefined) {
       this._incrementalGraph.terminateStream(newRootNode, null);
     } else {

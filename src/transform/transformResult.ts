@@ -37,13 +37,7 @@ export function transformResult<
   TIncremental = ExperimentalIncrementalExecutionResults,
 >(
   args: ExecutionArgs,
-  {
-    objectFieldTransformers = {},
-    leafTransformers = {},
-  }: Partial<Transformers> = {
-    objectFieldTransformers: {},
-    leafTransformers: {},
-  },
+  transformers: Transformers = {},
   payloadPublisher: PayloadPublisher<
     TSubsequent,
     TIncremental
@@ -62,10 +56,7 @@ export function transformResult<
 
   const context = buildTransformationContext(
     originalArgs,
-    {
-      objectFieldTransformers,
-      leafTransformers,
-    },
+    transformers,
     executionPlanBuilder,
     prefix,
   );
@@ -99,8 +90,7 @@ function transformOriginalResult<TSubsequent, TIncremental>(
 
     const completed = completeInitialResult(context, data);
 
-    // TODO: add test case
-    return isPromise(completed) /* c8 ignore start */
+    return isPromise(completed)
       ? completed.then((resolved) =>
           buildIncrementalResponse(
             data,
@@ -134,9 +124,9 @@ function transformOriginalResult<TSubsequent, TIncremental>(
         const { data, errors } = resolved;
         return errors.length === 0 ? { data } : { errors, data };
       } /* c8 ignore start */
-      // TODO: add test case
+      // TODO: add test case for this branch
       return buildIncrementalResponse(originalData, resolved, payloadPublisher);
-    }); /* c8 ignore start */
+    }); /* c8 ignore stop */
   }
 
   const { incrementalDataRecords } = completed;
