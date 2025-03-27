@@ -59,12 +59,12 @@ import type {
 } from './types.js';
 
 interface IncrementalContext {
+  deferUsageSet: DeferUsageSet | undefined;
   newErrors: Map<Path | undefined, GraphQLError>;
   originalErrors: Array<GraphQLError>;
   foundPathScopedObjects: ObjMap<ObjMap<FoundPathScopedObjects>>;
   deferredFragments: Array<DeferredFragment>;
   incrementalDataRecords: Array<IncrementalDataRecord>;
-  deferUsageSet: DeferUsageSet | undefined;
 }
 
 interface FoundPathScopedObjects {
@@ -109,12 +109,12 @@ export function completeInitialResult(
   incrementalDataRecords: ReadonlyArray<IncrementalDataRecord>;
 }> {
   const incrementalContext: IncrementalContext = {
+    deferUsageSet: undefined,
     newErrors: new Map(),
     originalErrors: [],
     foundPathScopedObjects: Object.create(null),
     deferredFragments: [],
     incrementalDataRecords: [],
-    deferUsageSet: undefined,
   };
 
   const { schema, operation, fragments, variableValues, hideSuggestions } =
@@ -806,12 +806,12 @@ function collectExecutionGroups(
           groupedFieldSet,
           runtimeType,
           {
+            deferUsageSet,
             newErrors: new Map(),
             originalErrors: [],
             foundPathScopedObjects: Object.create(null),
             deferredFragments: [],
             incrementalDataRecords: [],
-            deferUsageSet,
           },
           deferMap,
         ),
@@ -975,12 +975,12 @@ function maybeAddStream(
         pathStr,
         index,
         {
+          deferUsageSet: undefined,
           newErrors: new Map(),
           originalErrors: [],
           foundPathScopedObjects: Object.create(null),
           deferredFragments: [],
           incrementalDataRecords: [],
-          deferUsageSet: undefined,
         },
       ),
     );
