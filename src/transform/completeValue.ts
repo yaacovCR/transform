@@ -5,6 +5,7 @@ import type {
   GraphQLNullableOutputType,
   GraphQLObjectType,
   GraphQLOutputType,
+  SubsequentIncrementalExecutionResult,
   ValidatedExecutionArgs,
 } from 'graphql';
 import {
@@ -65,6 +66,7 @@ interface IncrementalContext {
   foundPathScopedObjects: ObjMap<ObjMap<FoundPathScopedObjects>>;
   deferredFragments: Array<DeferredFragment>;
   incrementalDataRecords: Array<IncrementalDataRecord>;
+  extendedSubsequentResults: Array<ExtendedSubsequentResults>;
 }
 
 interface FoundPathScopedObjects {
@@ -73,6 +75,15 @@ interface FoundPathScopedObjects {
   extender: ObjectBatchExtender;
   type: GraphQLObjectType;
   fieldDetailsList: ReadonlyArray<FieldDetails>;
+}
+
+interface ExtendedSubsequentResults {
+  path: ReadonlyArray<string | number>;
+  subsequentResults: AsyncGenerator<
+    SubsequentIncrementalExecutionResult,
+    void,
+    void
+  >;
 }
 
 interface StreamUsage {
@@ -115,6 +126,7 @@ export function completeInitialResult(
     foundPathScopedObjects: Object.create(null),
     deferredFragments: [],
     incrementalDataRecords: [],
+    extendedSubsequentResults: [],
   };
 
   const { schema, operation, fragments, variableValues, hideSuggestions } =
@@ -812,6 +824,7 @@ function collectExecutionGroups(
             foundPathScopedObjects: Object.create(null),
             deferredFragments: [],
             incrementalDataRecords: [],
+            extendedSubsequentResults: [],
           },
           deferMap,
         ),
@@ -981,6 +994,7 @@ function maybeAddStream(
           foundPathScopedObjects: Object.create(null),
           deferredFragments: [],
           incrementalDataRecords: [],
+          extendedSubsequentResults: [],
         },
       ),
     );
