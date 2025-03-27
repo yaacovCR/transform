@@ -126,7 +126,7 @@ const transformed = await transformResult(originalResult, {
 
 ### Configurable Path Scoped Object Extenders
 
-Pass `pathScopedFieldTransformers` in a `Transformers` object to `transformResult()`, keyed by a period-delimited path to the given field within the operation. (Numeric indices for list fields are simply skipped, reflecting the path within the given operation rather than the result.)
+Pass `pathScopedObjectBatchExtenders` in a `Transformers` object to `transformResult()`, keyed by a period-delimited path to the given field within the operation as well as the type of object. (If the field is of abstract type, the type may vary, and you can specify how to extend the object value for each possible type.)
 
 ```ts
 import { transformResult } from '@yaacovCR/transform';
@@ -140,10 +140,27 @@ const originalResult = await experimentalExecuteIncrementally({
 });
 
 const transformed = await transformResult(originalResult, {
-  objectFieldTransformers: {
-    'someType.someFieldNameOrAlias': (value) => 'transformed',
+  pathScopedObjectBatchExtenders: {
+    someType.someField: {
+      SomeField: (objects) =>
+        objects.map(() => ({
+          data: { additionalField: 'additionalField' },
+        })),
+    },
   },
 });
+```
+
+The signature is as follows:
+
+```ts
+type PathScopedObjectBatchExtenders = ObjMap<ObjMap<ObjectBatchExtender>>;
+
+export type ObjectBatchExtender = (
+  objects: ReadonlyArray<ObjMap<unknown>>,
+  type: GraphQLObjectType,
+  fieldDetailsList: ReadonlyArray<FieldDetails>,
+) => PromiseOrValue<ReadonlyArray<ExecutionResult>>;
 ```
 
 ### Legacy Incremental Delivery Format
