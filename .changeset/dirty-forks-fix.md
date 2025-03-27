@@ -2,4 +2,4 @@
 '@yaacovcr/transform': patch
 ---
 
-Add tentative plan for asynchronous transformations
+Add path-scoped field transformers and path-scoped object extenders.
