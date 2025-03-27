@@ -313,16 +313,7 @@ function updateObjects(
       }
       if (errors) {
         incrementalContext.originalErrors.push(
-          ...errors.map(
-            (error) =>
-              new GraphQLError(error.message, {
-                ...error,
-                path: error.path
-                  ? // TODO: add test case?
-                    [...pathArr, ...error.path] /* c8 ignore start */
-                  : pathArr /* c8 ignore stop */,
-              }),
-          ),
+          ...errors.map((error) => prependPath(error, pathArr)),
         );
       }
     } else {
@@ -338,6 +329,20 @@ function updateObjects(
       incrementalContext.newErrors.set(paths[i], error);
     }
   }
+}
+
+function prependPath(
+  error: GraphQLError,
+  pathArr: ReadonlyArray<string | number>,
+): GraphQLError {
+  const errorPath = error.path;
+  return new GraphQLError(error.message, {
+    ...error,
+    path: errorPath
+      ? // TODO: add test case?
+        [...pathArr, ...errorPath] /* c8 ignore start */
+      : pathArr /* c8 ignore stop */,
+  });
 }
 
 // eslint-disable-next-line @typescript-eslint/max-params
