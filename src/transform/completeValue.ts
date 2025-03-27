@@ -304,7 +304,10 @@ function updateObjects(
             (error) =>
               new GraphQLError(error.message, {
                 ...error,
-                path: error.path ? [...pathArr, ...error.path] : pathArr,
+                path: error.path
+                  ? // TODO: add test case?
+                    [...pathArr, ...error.path] /* c8 ignore start */
+                  : pathArr /* c8 ignore stop */,
               }),
           ),
         );

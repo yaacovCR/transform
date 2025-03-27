@@ -141,8 +141,6 @@ export class IncrementalPublisher<TSubsequent, TIncremental> {
         return { value: subsequentPayload, done: false };
       }
 
-      // TODO: add test case for async transformation
-      /* c8 ignore next 8 */
       if (this._incrementalGraph.hasPending()) {
         // eslint-disable-next-line no-await-in-loop
         batch = await this._incrementalGraph.nextCompletedBatch();
@@ -284,7 +282,7 @@ export class IncrementalPublisher<TSubsequent, TIncremental> {
     this._incrementalGraph.completeStreamItems(newRootNode);
 
     // TODO: add test case - original executor completes stream early normally
-    /* c8 ignore next 4 */
+    /* c8 ignore next 3 */
     if (pendingResultsByPath === undefined) {
       this._incrementalGraph.terminateStream(newRootNode, null);
     } else {

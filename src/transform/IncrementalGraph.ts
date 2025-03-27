@@ -89,8 +89,6 @@ export class IncrementalGraph {
     }
   }
 
-  // TODO: add test case for async transformation
-  /* c8 ignore next 8 */
   nextCompletedBatch(): Promise<Iterable<IncrementalGraphEvent> | undefined> {
     const { promise, resolve } = promiseWithResolvers<
       Iterable<IncrementalGraphEvent> | undefined
@@ -297,8 +295,6 @@ export class IncrementalGraph {
 
     pendingExecutionGroup.result = result = result();
     const value = result.value;
-    // TODO: add test case for async transformation
-    /* c8 ignore next 8 */
     if (isPromise(value)) {
       this._pending.add(pendingExecutionGroup);
       // eslint-disable-next-line @typescript-eslint/no-floating-promises
@@ -329,8 +325,6 @@ export class IncrementalGraph {
           ? streamItem.result()
           : streamItem.result;
       if (!(result instanceof BoxedPromiseOrValue)) {
-        // TODO: add test case for completion with existing items
-        /* c8 ignore next 6 */
         if (items.length > 0) {
           this._enqueue({
             stream,
@@ -349,8 +343,6 @@ export class IncrementalGraph {
       }
 
       let value = result.value;
-      // TODO: add test case for async transformation
-      /* c8 ignore start */
       if (isPromise(value)) {
         this._pending.add(stream);
         if (items.length > 0) {
@@ -374,7 +366,6 @@ export class IncrementalGraph {
         // eslint-disable-next-line no-await-in-loop
         await Promise.resolve();
       }
-      /* c8 ignore stop */
       const item = value.item;
       if (item === undefined) {
         // TODO: add test case for failure via transformation with existing items
@@ -416,8 +407,7 @@ export class IncrementalGraph {
     const next = this._nextQueue.shift();
     if (next === undefined) {
       return;
-    } /* c8 ignore next 3 */
-    // TODO: add test case for async transformation
+    }
     next(this.currentCompletedBatch());
   }
 }
