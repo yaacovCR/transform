@@ -1266,7 +1266,8 @@ describe('transformResult', () => {
           },
           errors: [
             {
-              message: 'An error occurred while resolving a batched object.',
+              message:
+                'Fatal GraphQL error(s) occurred while resolving a batched object.',
               path: ['someObjectField'],
               locations: [{ line: 1, column: 3 }],
             },
@@ -1416,7 +1417,8 @@ describe('transformResult', () => {
           data: null,
           errors: [
             {
-              message: 'An error occurred while resolving a batched object.',
+              message:
+                'Fatal GraphQL error(s) occurred while resolving a batched object.',
               path: ['nonNullableObjectField'],
               locations: [{ line: 1, column: 3 }],
             },
@@ -1729,7 +1731,8 @@ describe('transformResult', () => {
           },
           errors: [
             {
-              message: 'An error occurred while resolving a batched object.',
+              message:
+                'Fatal GraphQL error(s) occurred while resolving a batched object.',
               path: ['someObjectField'],
               locations: [{ line: 1, column: 3 }],
             },
@@ -1882,7 +1885,8 @@ describe('transformResult', () => {
           data: null,
           errors: [
             {
-              message: 'An error occurred while resolving a batched object.',
+              message:
+                'Fatal GraphQL error(s) occurred while resolving a batched object.',
               path: ['nonNullableObjectField'],
               locations: [{ line: 1, column: 3 }],
             },
