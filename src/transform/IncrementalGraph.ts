@@ -377,11 +377,11 @@ export class IncrementalGraph {
         }
         // eslint-disable-next-line no-await-in-loop
         value = await value;
-        this._pending.delete(stream);
         // wait an additional tick to coalesce resolving additional promises
         // within the queue
         // eslint-disable-next-line no-await-in-loop
         await Promise.resolve();
+        this._pending.delete(stream);
       }
       const item = value.item;
       if (item === undefined) {

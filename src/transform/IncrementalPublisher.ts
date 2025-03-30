@@ -5,6 +5,7 @@ import type {
   // eslint-disable-next-line n/no-missing-import
 } from 'graphql/execution/types.js';
 
+import { AsyncIterableRegistry } from '../jsutils/AsyncIterableRegistry.js';
 import { invariant } from '../jsutils/invariant.js';
 import type { ObjMap } from '../jsutils/ObjMap.js';
 
@@ -42,6 +43,7 @@ export class IncrementalPublisher<TSubsequent, TIncremental> {
   private _incrementalGraph: IncrementalGraph;
   private _payloadPublisher: PayloadPublisher<TSubsequent, TIncremental>;
   private _subsequentPayloadPublisher: SubsequentPayloadPublisher<TSubsequent>;
+  private _asyncIteratorRegistry: AsyncIterableRegistry<TSubsequent>;
 
   constructor(
     originalData: ObjMap<unknown>,
@@ -56,10 +58,19 @@ export class IncrementalPublisher<TSubsequent, TIncremental> {
     }
     this._subsequentResults = subsequentResults;
 
+    this._incrementalGraph = new IncrementalGraph();
     this._payloadPublisher = payloadPublisher;
     this._subsequentPayloadPublisher =
       payloadPublisher.getSubsequentPayloadPublisher();
-    this._incrementalGraph = new IncrementalGraph();
+    this._asyncIteratorRegistry = new AsyncIterableRegistry();
+    this._asyncIteratorRegistry.add({
+      [Symbol.asyncIterator]() {
+        return this;
+      },
+      next: () => this._next(),
+      return: () => this._return(),
+      throw: (error) => this._throw(error),
+    });
   }
 
   buildResponse(
@@ -100,14 +111,7 @@ export class IncrementalPublisher<TSubsequent, TIncremental> {
   }
 
   private _subscribe(): AsyncGenerator<TSubsequent, void, void> {
-    return {
-      [Symbol.asyncIterator]() {
-        return this;
-      },
-      next: () => this._next(),
-      return: () => this._return(),
-      throw: (error) => this._throw(error),
-    };
+    return this._asyncIteratorRegistry.subscribe();
   }
 
   private async _next(): Promise<IteratorResult<TSubsequent, void>> {
