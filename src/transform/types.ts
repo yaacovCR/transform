@@ -24,12 +24,14 @@ export type StreamItemResult =
 interface SuccessfulStreamItemResult {
   item: unknown;
   errors: ReadonlyArray<GraphQLError>;
+  deferredFragments: ReadonlyArray<DeferredFragment>;
   incrementalDataRecords: ReadonlyArray<IncrementalDataRecord>;
 }
 
 interface FailedStreamItemResult {
   item?: never;
   errors: ReadonlyArray<GraphQLError>;
+  deferredFragments?: never;
   incrementalDataRecords?: never;
 }
 
@@ -43,6 +45,12 @@ export interface StreamItem {
     | null;
 }
 
+export function isCompletedStreamItems(
+  record: IncrementalGraphEvent,
+): record is StreamItems {
+  return 'stream' in record;
+}
+
 export interface StreamItems {
   stream: Stream;
   errors?: ReadonlyArray<GraphQLError>;
@@ -52,6 +60,7 @@ export interface StreamItems {
 export interface StreamItemsResult {
   items: ReadonlyArray<unknown>;
   errors: ReadonlyArray<GraphQLError>;
+  deferredFragments: ReadonlyArray<DeferredFragment>;
   incrementalDataRecords: ReadonlyArray<IncrementalDataRecord>;
 }
 
@@ -62,6 +71,12 @@ export function isStream(
 }
 
 export type SubsequentResultRecord = DeferredFragment | Stream;
+
+export function isDeferredFragment(
+  record: IncrementalDataRecord | SubsequentResultRecord,
+): record is DeferredFragment {
+  return 'pendingExecutionGroups' in record;
+}
 
 export interface DeferredFragment {
   path: Path | undefined;
@@ -77,17 +92,35 @@ export interface DeferredFragment {
   failed: boolean | undefined;
 }
 
+export function isPendingExecutionGroup(
+  record: IncrementalDataRecord,
+): record is PendingExecutionGroup {
+  return 'deferredFragments' in record;
+}
+
 export interface PendingExecutionGroup {
   path: Path | undefined;
   deferredFragments: ReadonlyArray<DeferredFragment>;
   result: Thunk<BoxedPromiseOrValue<ExecutionGroupResult>>;
 }
 
+export function isExecutionGroupResult(
+  record: IncrementalGraphEvent,
+): record is ExecutionGroupResult {
+  return 'deferredFragments' in record;
+}
 export interface ExecutionGroupResult {
   pendingExecutionGroup: PendingExecutionGroup;
   data: ObjMap<unknown>;
   errors: ReadonlyArray<GraphQLError>;
+  deferredFragments: ReadonlyArray<DeferredFragment>;
   incrementalDataRecords: ReadonlyArray<IncrementalDataRecord>;
+}
+
+export function isFailedDeferredFragment(
+  record: IncrementalGraphEvent,
+): record is FailedDeferredFragment {
+  return 'deferredFragment' in record;
 }
 
 export interface FailedDeferredFragment {

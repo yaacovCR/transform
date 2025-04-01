@@ -15,6 +15,7 @@ import type {
 import { invariant } from '../jsutils/invariant.js';
 import type { ObjMap } from '../jsutils/ObjMap.js';
 import { pathToArray } from '../jsutils/Path.js';
+import type { SimpleAsyncGenerator } from '../jsutils/SimpleAsyncGenerator.js';
 
 import type {
   PayloadPublisher,
@@ -160,12 +161,6 @@ export function getDefaultPayloadPublisher(): PayloadPublisher<
 
         return subsequentIncrementalExecutionResult;
       }
-
-      // TODO: fix coverage?
-      /* c8 ignore next 3 */
-      if (!hasNext) {
-        return { hasNext };
-      }
     }
   }
 
@@ -173,11 +168,7 @@ export function getDefaultPayloadPublisher(): PayloadPublisher<
     data: ObjMap<unknown>,
     errors: ReadonlyArray<GraphQLError>,
     newRootNodes: ReadonlyArray<SubsequentResultRecord>,
-    subsequentResults: AsyncGenerator<
-      SubsequentIncrementalExecutionResult,
-      void,
-      void
-    >,
+    subsequentResults: SimpleAsyncGenerator<SubsequentIncrementalExecutionResult>,
   ): ExperimentalIncrementalExecutionResults {
     const pending: Array<PendingResult> = [];
     addPendingResults(newRootNodes, pending);

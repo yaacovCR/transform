@@ -15,7 +15,11 @@ import type {
   StreamItem,
   SubsequentResultRecord,
 } from './types.js';
-import { isStream } from './types.js';
+import {
+  isDeferredFragment,
+  isPendingExecutionGroup,
+  isStream,
+} from './types.js';
 
 /**
  * @internal
@@ -46,9 +50,11 @@ export class IncrementalGraph {
   }
 
   getNewRootNodes(
+    deferredFragments: ReadonlyArray<DeferredFragment>,
     incrementalDataRecords: ReadonlyArray<IncrementalDataRecord>,
   ): ReadonlyArray<SubsequentResultRecord> {
     const initialResultChildren = new Set<SubsequentResultRecord>();
+    this._addDeferredFragments(deferredFragments, initialResultChildren);
     this._addIncrementalDataRecords(
       incrementalDataRecords,
       undefined,
@@ -89,6 +95,8 @@ export class IncrementalGraph {
     }
   }
 
+  // TODO: add test case for async transformation
+  /* c8 ignore start */
   nextCompletedBatch(): Promise<Iterable<IncrementalGraphEvent> | undefined> {
     const { promise, resolve } = promiseWithResolvers<
       Iterable<IncrementalGraphEvent> | undefined
@@ -96,6 +104,7 @@ export class IncrementalGraph {
     this._nextQueue.push(resolve);
     return promise;
   }
+  /* c8 ignore stop */
 
   hasPending(): boolean {
     return this._pending.size > 0;
@@ -184,13 +193,22 @@ export class IncrementalGraph {
     }
   }
 
+  private _addDeferredFragments(
+    deferredFragments: ReadonlyArray<DeferredFragment>,
+    initialResultChildren?: Set<SubsequentResultRecord>,
+  ): void {
+    for (const deferredFragment of deferredFragments) {
+      this._addDeferredFragment(deferredFragment, initialResultChildren);
+    }
+  }
+
   private _addIncrementalDataRecords(
     incrementalDataRecords: ReadonlyArray<IncrementalDataRecord>,
     parents: ReadonlyArray<DeferredFragment> | undefined,
     initialResultChildren?: Set<SubsequentResultRecord>,
   ): void {
     for (const incrementalDataRecord of incrementalDataRecords) {
-      if (!isStream(incrementalDataRecord)) {
+      if (isPendingExecutionGroup(incrementalDataRecord)) {
         let ready = false;
         for (const deferredFragment of incrementalDataRecord.deferredFragments) {
           this._addDeferredFragment(deferredFragment, initialResultChildren);
@@ -202,13 +220,15 @@ export class IncrementalGraph {
         if (ready && this._completesRootNode(incrementalDataRecord)) {
           this._onExecutionGroup(incrementalDataRecord);
         }
-      } else if (parents === undefined) {
-        invariant(initialResultChildren !== undefined);
-        initialResultChildren.add(incrementalDataRecord);
-      } else {
-        for (const parent of parents) {
-          this._addDeferredFragment(parent, initialResultChildren);
-          parent.children.add(incrementalDataRecord);
+      } else if (isStream(incrementalDataRecord)) {
+        if (parents === undefined) {
+          invariant(initialResultChildren !== undefined);
+          initialResultChildren.add(incrementalDataRecord);
+        } else {
+          for (const parent of parents) {
+            this._addDeferredFragment(parent, initialResultChildren);
+            parent.children.add(incrementalDataRecord);
+          }
         }
       }
     }
@@ -219,7 +239,7 @@ export class IncrementalGraph {
   ): ReadonlyArray<SubsequentResultRecord> {
     const newRootNodes: Array<SubsequentResultRecord> = [];
     for (const node of maybeEmptyNewRootNodes) {
-      if (!isStream(node)) {
+      if (isDeferredFragment(node)) {
         if (node.pendingExecutionGroups.size > 0) {
           // TODO: add test cases for executor returning results early
           /* c8 ignore start */
@@ -282,7 +302,6 @@ export class IncrementalGraph {
       return;
     }
     parent.children.add(deferredFragment);
-    this._addDeferredFragment(parent, initialResultChildren);
   }
 
   private _onExecutionGroup(
@@ -295,6 +314,9 @@ export class IncrementalGraph {
 
     pendingExecutionGroup.result = result = result();
     const value = result.value;
+
+    // TODO: add test case for async transformation
+    /* c8 ignore start */
     if (isPromise(value)) {
       this._pending.add(pendingExecutionGroup);
       // eslint-disable-next-line @typescript-eslint/no-floating-promises
@@ -302,9 +324,11 @@ export class IncrementalGraph {
         this._pending.delete(pendingExecutionGroup);
         this._enqueue(resolved);
       });
-    } else {
-      this._enqueue(value);
+      return;
     }
+    /* c8 ignore stop */
+
+    this._enqueue(value);
   }
 
   private async _onStreamItems(stream: Stream): Promise<void> {
@@ -315,6 +339,7 @@ export class IncrementalGraph {
 
     let items: Array<unknown> = [];
     let errors: Array<GraphQLError> = [];
+    const deferredFragments: Array<DeferredFragment> = [];
     let incrementalDataRecords: Array<IncrementalDataRecord> = [];
 
     const streamItemQueue = stream.streamItemQueue;
@@ -325,12 +350,20 @@ export class IncrementalGraph {
           ? streamItem.result()
           : streamItem.result;
       if (!(result instanceof BoxedPromiseOrValue)) {
+        // TODO: add test case for async transformation
+        /* c8 ignore start */
         if (items.length > 0) {
           this._enqueue({
             stream,
-            result: { items, errors, incrementalDataRecords },
+            result: {
+              items,
+              errors,
+              deferredFragments,
+              incrementalDataRecords,
+            },
           });
         }
+        /* c8 ignore stop */
         this._enqueue(
           result === null
             ? { stream }
@@ -343,6 +376,8 @@ export class IncrementalGraph {
       }
 
       let value = result.value;
+      // TODO: add test case for async transformation
+      /* c8 ignore start */
       if (isPromise(value)) {
         this._pending.add(stream);
         if (items.length > 0) {
@@ -351,6 +386,7 @@ export class IncrementalGraph {
             result: {
               items,
               errors,
+              deferredFragments,
               incrementalDataRecords,
             },
           });
@@ -360,12 +396,13 @@ export class IncrementalGraph {
         }
         // eslint-disable-next-line no-await-in-loop
         value = await value;
-        this._pending.delete(stream);
         // wait an additional tick to coalesce resolving additional promises
         // within the queue
         // eslint-disable-next-line no-await-in-loop
         await Promise.resolve();
+        this._pending.delete(stream);
       }
+      /* c8 ignore stop */
       const item = value.item;
       if (item === undefined) {
         // TODO: add test case for failure via transformation with existing items
@@ -376,6 +413,7 @@ export class IncrementalGraph {
             result: {
               items,
               errors,
+              deferredFragments,
               incrementalDataRecords,
             },
           });
@@ -389,13 +427,14 @@ export class IncrementalGraph {
       }
       items.push(item);
       errors.push(...value.errors);
+      deferredFragments.push(...value.deferredFragments);
       incrementalDataRecords.push(...value.incrementalDataRecords);
     }
 
     if (items.length > 0) {
       this._enqueue({
         stream,
-        result: { items, errors, incrementalDataRecords },
+        result: { items, errors, deferredFragments, incrementalDataRecords },
       });
     }
 
@@ -407,7 +446,8 @@ export class IncrementalGraph {
     const next = this._nextQueue.shift();
     if (next === undefined) {
       return;
-    }
+    } /* c8 ignore start */
+    // TODO: add test case for async transformation
     next(this.currentCompletedBatch());
-  }
+  } /* c8 ignore stop */
 }

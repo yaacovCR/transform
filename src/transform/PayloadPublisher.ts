@@ -1,6 +1,7 @@
 import type { GraphQLError } from 'graphql';
 
 import type { ObjMap } from '../jsutils/ObjMap.js';
+import type { SimpleAsyncGenerator } from '../jsutils/SimpleAsyncGenerator.js';
 
 import type {
   DeferredFragment,
@@ -10,17 +11,18 @@ import type {
   SubsequentResultRecord,
 } from './types.js';
 
-export interface PayloadPublisher<TSubsequentPayload, TInitialPayload> {
-  getSubsequentPayloadPublisher: () => SubsequentPayloadPublisher<TSubsequentPayload>;
+export interface PayloadPublisher<TSubsequent, TIncremental> {
+  getSubsequentPayloadPublisher: () => SubsequentPayloadPublisher<TSubsequent>;
+
   getPayloads: (
     data: ObjMap<unknown>,
     errors: ReadonlyArray<GraphQLError>,
     newRootNodes: ReadonlyArray<SubsequentResultRecord>,
-    subsequentPayloads: AsyncGenerator<TSubsequentPayload, void, void>,
-  ) => TInitialPayload;
+    subsequentPayloads: SimpleAsyncGenerator<TSubsequent>,
+  ) => TIncremental;
 }
 
-export interface SubsequentPayloadPublisher<TSubsequentPayload> {
+export interface SubsequentPayloadPublisher<TSubsequent> {
   addFailedDeferredFragment: (
     deferredFragment: DeferredFragment,
     errors: ReadonlyArray<GraphQLError>,
@@ -42,5 +44,5 @@ export interface SubsequentPayloadPublisher<TSubsequentPayload> {
     streamItemsResult: StreamItemsResult,
     index: number,
   ) => void;
-  getSubsequentPayload: (hasNext: boolean) => TSubsequentPayload | undefined;
+  getSubsequentPayload: (hasNext: boolean) => TSubsequent | undefined;
 }

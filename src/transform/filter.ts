@@ -7,13 +7,13 @@ import { pathToArray } from '../jsutils/Path.js';
 
 import type { IncrementalDataRecord } from './types.js';
 
-export function filter<T>(
-  data: T,
+export function filter<TData>(
+  data: TData,
   initialPath: Path | undefined,
   errors: ReadonlyMap<Path | undefined, GraphQLError>,
   incrementalDataRecords: ReadonlyArray<IncrementalDataRecord>,
 ): {
-  filteredData: T;
+  filteredData: TData;
   filteredRecords: ReadonlyArray<IncrementalDataRecord>;
 } {
   const nullableErrorPaths = new Set<Path | undefined>();
@@ -70,7 +70,7 @@ export function filter<T>(
   }
 
   return {
-    filteredData: filteredData as T,
+    filteredData: filteredData as TData,
     filteredRecords,
   };
 }

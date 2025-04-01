@@ -5,6 +5,7 @@
     "src/**/index.ts",
     "src/jsutils/ObjMap.ts",
     "src/jsutils/PromiseOrValue.ts",
+    "src/jsutils/SimpleAsyncGenerator.ts",
     "src/transform/PayloadPublisher.ts"
   ],
   "clean": true,

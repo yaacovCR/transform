@@ -25,7 +25,6 @@ pnpm add @yaacovCR/transform graphql@17.0.0-alpha.8
 This library offers:
 
 - Configurable synchronous leaf value transformers, object field transformers, and path-scoped field transformers for modifying GraphQL results.
-- Configurable synchronous/asynchronous extenders of object values with additional GraphQL results.
 - Mapping from the latest incremental delivery format to the legacy format.
 
 Note: In the case of multiple transformers, execution is in the above order: first any leaf value transformer is executed, followed by any object field transformer, and then the path-scoped field transformer.
@@ -122,45 +121,6 @@ const transformed = await transformResult(originalResult, {
     'someType.someFieldNameOrAlias': (value) => 'transformed',
   },
 });
-```
-
-### Configurable Path Scoped Object Extenders
-
-Pass `pathScopedObjectBatchExtenders` in a `Transformers` object to `transformResult()`, keyed by a period-delimited path to the given field within the operation as well as the type of object. (If the field is of abstract type, the type may vary, and you can specify how to extend the object value for each possible type.)
-
-```ts
-import { transformResult } from '@yaacovCR/transform';
-
-const originalResult = await experimentalExecuteIncrementally({
-  schema,
-  document,
-  rootValue,
-  contextValue,
-  variableValues,
-});
-
-const transformed = await transformResult(originalResult, {
-  pathScopedObjectBatchExtenders: {
-    someType.someField: {
-      SomeField: (objects) =>
-        objects.map(() => ({
-          data: { additionalField: 'additionalField' },
-        })),
-    },
-  },
-});
-```
-
-The signature is as follows:
-
-```ts
-type PathScopedObjectBatchExtenders = ObjMap<ObjMap<ObjectBatchExtender>>;
-
-export type ObjectBatchExtender = (
-  objects: ReadonlyArray<ObjMap<unknown>>,
-  type: GraphQLObjectType,
-  fieldDetailsList: ReadonlyArray<FieldDetails>,
-) => PromiseOrValue<ReadonlyArray<ExecutionResult>>;
 ```
 
 ### Legacy Incremental Delivery Format

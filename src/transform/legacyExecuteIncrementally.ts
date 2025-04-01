@@ -3,6 +3,7 @@ import type { ExecutionArgs, ExecutionResult, GraphQLError } from 'graphql';
 import type { ObjMap } from '../jsutils/ObjMap.js';
 import { pathToArray } from '../jsutils/Path.js';
 import type { PromiseOrValue } from '../jsutils/PromiseOrValue.js';
+import type { SimpleAsyncGenerator } from '../jsutils/SimpleAsyncGenerator.js';
 
 import { buildBranchingExecutionPlan } from './buildBranchingExecutionPlan.js';
 import type {
@@ -20,11 +21,7 @@ import type {
 
 export interface LegacyExperimentalIncrementalExecutionResults {
   initialResult: LegacyInitialIncrementalExecutionResult;
-  subsequentResults: AsyncGenerator<
-    LegacySubsequentIncrementalExecutionResult,
-    void,
-    void
-  >;
+  subsequentResults: SimpleAsyncGenerator<LegacySubsequentIncrementalExecutionResult>;
 }
 
 export interface LegacyInitialIncrementalExecutionResult
@@ -201,11 +198,7 @@ function getLegacyPayloadPublisher(): PayloadPublisher<
     data: ObjMap<unknown>,
     errors: ReadonlyArray<GraphQLError>,
     _newRootNodes: ReadonlyArray<SubsequentResultRecord>,
-    subsequentResults: AsyncGenerator<
-      LegacySubsequentIncrementalExecutionResult,
-      void,
-      void
-    >,
+    subsequentResults: SimpleAsyncGenerator<LegacySubsequentIncrementalExecutionResult>,
   ): LegacyExperimentalIncrementalExecutionResults {
     return {
       initialResult:

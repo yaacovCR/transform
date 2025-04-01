@@ -1,13 +1,9 @@
-import type {
-  ExecutionArgs,
-  ExecutionResult,
-  ExperimentalIncrementalExecutionResults,
-  GraphQLError,
-} from 'graphql';
+import type { ExecutionArgs, ExecutionResult, GraphQLError } from 'graphql';
 import { experimentalExecuteQueryOrMutationOrSubscriptionEvent } from 'graphql';
 // eslint-disable-next-line n/no-missing-import
 import { validateExecutionArgs } from 'graphql/execution/execute.js';
 import type {
+  ExperimentalIncrementalExecutionResults,
   PendingResult,
   SubsequentIncrementalExecutionResult,
   // eslint-disable-next-line n/no-missing-import
@@ -16,6 +12,7 @@ import type {
 import { isPromise } from '../jsutils/isPromise.js';
 import type { ObjMap } from '../jsutils/ObjMap.js';
 import type { PromiseOrValue } from '../jsutils/PromiseOrValue.js';
+import type { SimpleAsyncGenerator } from '../jsutils/SimpleAsyncGenerator.js';
 
 import { buildExecutionPlan } from './buildExecutionPlan.js';
 import type {
@@ -30,7 +27,7 @@ import { getDefaultPayloadPublisher } from './getDefaultPayloadPublisher.js';
 import { IncrementalPublisher } from './IncrementalPublisher.js';
 import type { PayloadPublisher } from './PayloadPublisher.js';
 import { transformForTargetSubschema } from './transformForTargetSubschema.js';
-import type { IncrementalDataRecord } from './types.js';
+import type { DeferredFragment, IncrementalDataRecord } from './types.js';
 
 export function transformResult<
   TSubsequent = SubsequentIncrementalExecutionResult,
@@ -90,6 +87,8 @@ function transformOriginalResult<TSubsequent, TIncremental>(
 
     const completed = completeInitialResult(context, data);
 
+    // TODO: add test case for async transformation
+    /* c8 ignore next 10 */
     return isPromise(completed)
       ? completed.then((resolved) =>
           buildIncrementalResponse(
@@ -117,18 +116,27 @@ function transformOriginalResult<TSubsequent, TIncremental>(
   embedErrors(originalData, originalErrors);
   const completed = completeInitialResult(context, originalData);
 
+  // TODO: add test case for async transformation
+  /* c8 ignore next 5 */
   if (isPromise(completed)) {
-    return completed.then((resolved) => {
-      const { incrementalDataRecords } = resolved;
-      if (incrementalDataRecords.length === 0) {
-        const { data, errors } = resolved;
-        return errors.length === 0 ? { data } : { errors, data };
-      } /* c8 ignore start */
-      // TODO: add test case for this branch
-      return buildIncrementalResponse(originalData, resolved, payloadPublisher);
-    }); /* c8 ignore stop */
+    return completed.then((resolved) =>
+      buildResponse(resolved, originalData, payloadPublisher),
+    );
   }
 
+  return buildResponse(completed, originalData, payloadPublisher);
+}
+
+function buildResponse<TSubsequent, TIncremental>(
+  completed: {
+    data: ObjMap<unknown>;
+    errors: ReadonlyArray<GraphQLError>;
+    deferredFragments: ReadonlyArray<DeferredFragment>;
+    incrementalDataRecords: ReadonlyArray<IncrementalDataRecord>;
+  },
+  originalData: ObjMap<unknown>,
+  payloadPublisher: PayloadPublisher<TSubsequent, TIncremental>,
+): PromiseOrValue<ExecutionResult | TIncremental> {
   const { incrementalDataRecords } = completed;
   if (incrementalDataRecords.length === 0) {
     const { data, errors } = completed;
@@ -143,13 +151,15 @@ function buildIncrementalResponse<TSubsequent, TIncremental>(
   initialResult: {
     data: ObjMap<unknown>;
     errors: ReadonlyArray<GraphQLError>;
+    deferredFragments: ReadonlyArray<DeferredFragment>;
     incrementalDataRecords: ReadonlyArray<IncrementalDataRecord>;
   },
   payloadPublisher: PayloadPublisher<TSubsequent, TIncremental>,
   pending?: ReadonlyArray<PendingResult>,
-  subsequentResults?: AsyncGenerator<SubsequentIncrementalExecutionResult>,
+  subsequentResults?: SimpleAsyncGenerator<SubsequentIncrementalExecutionResult>,
 ): TIncremental {
-  const { data, errors, incrementalDataRecords } = initialResult;
+  const { data, errors, deferredFragments, incrementalDataRecords } =
+    initialResult;
 
   const incrementalPublisher = new IncrementalPublisher(
     originalData,
@@ -161,6 +171,7 @@ function buildIncrementalResponse<TSubsequent, TIncremental>(
   return incrementalPublisher.buildResponse(
     data,
     errors,
+    deferredFragments,
     incrementalDataRecords,
   );
 }

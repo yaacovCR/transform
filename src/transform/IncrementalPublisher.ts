@@ -7,6 +7,7 @@ import type {
 
 import { invariant } from '../jsutils/invariant.js';
 import type { ObjMap } from '../jsutils/ObjMap.js';
+import type { SimpleAsyncGenerator } from '../jsutils/SimpleAsyncGenerator.js';
 
 import { IncrementalGraph } from './IncrementalGraph.js';
 import type { EncounteredPendingResult } from './MergedResult.js';
@@ -25,7 +26,13 @@ import type {
   StreamItems,
   SubsequentResultRecord,
 } from './types.js';
-import { isStream } from './types.js';
+import {
+  isCompletedStreamItems,
+  isDeferredFragment,
+  isExecutionGroupResult,
+  isFailedDeferredFragment,
+  isStream,
+} from './types.js';
 
 /**
  * This class is used to publish incremental results to the client, enabling semi-concurrent
@@ -37,7 +44,7 @@ export class IncrementalPublisher<TSubsequent, TIncremental> {
   private _isDone: boolean;
   private _mergedResult: MergedResult;
   private _subsequentResults:
-    | AsyncGenerator<SubsequentIncrementalExecutionResult>
+    | SimpleAsyncGenerator<SubsequentIncrementalExecutionResult>
     | undefined;
   private _incrementalGraph: IncrementalGraph;
   private _payloadPublisher: PayloadPublisher<TSubsequent, TIncremental>;
@@ -47,7 +54,7 @@ export class IncrementalPublisher<TSubsequent, TIncremental> {
     originalData: ObjMap<unknown>,
     payloadPublisher: PayloadPublisher<TSubsequent, TIncremental>,
     pending?: ReadonlyArray<PendingResult>,
-    subsequentResults?: AsyncGenerator<SubsequentIncrementalExecutionResult>,
+    subsequentResults?: SimpleAsyncGenerator<SubsequentIncrementalExecutionResult>,
   ) {
     this._isDone = false;
     this._mergedResult = new MergedResult(originalData);
@@ -56,18 +63,20 @@ export class IncrementalPublisher<TSubsequent, TIncremental> {
     }
     this._subsequentResults = subsequentResults;
 
+    this._incrementalGraph = new IncrementalGraph();
     this._payloadPublisher = payloadPublisher;
     this._subsequentPayloadPublisher =
       payloadPublisher.getSubsequentPayloadPublisher();
-    this._incrementalGraph = new IncrementalGraph();
   }
 
   buildResponse(
     data: ObjMap<unknown>,
     errors: ReadonlyArray<GraphQLError>,
+    deferredFragments: ReadonlyArray<DeferredFragment>,
     incrementalDataRecords: ReadonlyArray<IncrementalDataRecord>,
   ): TIncremental {
     const newRootNodes = this._incrementalGraph.getNewRootNodes(
+      deferredFragments,
       incrementalDataRecords,
     );
 
@@ -91,13 +100,15 @@ export class IncrementalPublisher<TSubsequent, TIncremental> {
 
       if (isStream(newRootNode)) {
         this._handleNewStream(newRootNode, pendingResultsByPath);
-      } else {
+      } else if (isDeferredFragment(newRootNode)) {
         this._handleNewDeferredFragment(newRootNode, pendingResultsByPath);
-      }
+      } /* c8 ignore start */ else {
+        invariant(false, 'Unexpected new root node type.');
+      } /* c8 ignore stop */
     }
   }
 
-  private _subscribe(): AsyncGenerator<TSubsequent, void, void> {
+  private _subscribe(): SimpleAsyncGenerator<TSubsequent> {
     return {
       [Symbol.asyncIterator]() {
         return this;
@@ -120,13 +131,15 @@ export class IncrementalPublisher<TSubsequent, TIncremental> {
       this._incrementalGraph.currentCompletedBatch();
     while (true) {
       for (const event of batch) {
-        if ('pendingExecutionGroup' in event) {
+        if (isExecutionGroupResult(event)) {
           this._handleCompletedExecutionGroup(event);
-        } else if ('stream' in event) {
+        } else if (isCompletedStreamItems(event)) {
           this._handleCompletedStreamItems(event);
-        } else {
+        } else if (isFailedDeferredFragment(event)) {
           this._handleFailedDeferredFragment(event);
-        }
+        } /* c8 ignore start */ else {
+          invariant(false, 'Unexpected event type in incremental graph.');
+        } /* c8 ignore stop */
       }
 
       const hasNext = this._incrementalGraph.hasNext();
@@ -141,6 +154,8 @@ export class IncrementalPublisher<TSubsequent, TIncremental> {
         return { value: subsequentPayload, done: false };
       }
 
+      // TODO: add test case for async transformation
+      /* c8 ignore next 7 */
       if (this._incrementalGraph.hasPending()) {
         // eslint-disable-next-line no-await-in-loop
         batch = await this._incrementalGraph.nextCompletedBatch();
@@ -154,7 +169,7 @@ export class IncrementalPublisher<TSubsequent, TIncremental> {
       // eslint-disable-next-line no-await-in-loop
       const next = await this._subsequentResults.next();
 
-      if (this._isDone) {
+      if (next.done || this._isDone) {
         return { value: undefined, done: true };
       }
 
@@ -193,8 +208,10 @@ export class IncrementalPublisher<TSubsequent, TIncremental> {
       );
       this._incrementalGraph.removeStream(stream);
     } else if (result) {
+      const { deferredFragments, incrementalDataRecords } = result;
       const newRootNodes = this._incrementalGraph.getNewRootNodes(
-        result.incrementalDataRecords,
+        deferredFragments,
+        incrementalDataRecords,
       );
       this._handleNewRootNodes(newRootNodes);
 
@@ -388,13 +405,13 @@ export class IncrementalPublisher<TSubsequent, TIncremental> {
   }
 
   private async _returnAsyncIterators(
-    subsequentResults: AsyncGenerator<SubsequentIncrementalExecutionResult>,
+    subsequentResults: SimpleAsyncGenerator<SubsequentIncrementalExecutionResult>,
   ): Promise<void> {
     await subsequentResults.return?.(undefined);
   }
 
   private async _returnAsyncIteratorsIgnoringErrors(
-    subsequentResults: AsyncGenerator<SubsequentIncrementalExecutionResult>,
+    subsequentResults: SimpleAsyncGenerator<SubsequentIncrementalExecutionResult>,
   ): Promise<void> {
     await this._returnAsyncIterators(subsequentResults).catch(() => {
       // Ignore errors
