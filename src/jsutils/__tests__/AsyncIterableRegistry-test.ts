@@ -4,12 +4,13 @@ import { beforeEach, describe, it } from 'mocha';
 import { resolveOnNextTick } from '../../__testUtils__/resolveOnNextTick.js';
 
 import { AsyncIterableRegistry } from '../AsyncIterableRegistry.js';
+import type { SimpleAsyncGenerator } from '../SimpleAsyncGenerator.js';
 
-function createAsyncGenerator<T>(
+function createSimpleAsyncGenerator<T>(
   values: Array<T>,
   delay = 10,
   initialDelay = 0,
-): AsyncGenerator<T, void, void> {
+): SimpleAsyncGenerator<T> {
   async function* gen() {
     await new Promise((res) => setTimeout(res, initialDelay));
     for (const v of values) {
@@ -24,7 +25,7 @@ function createAsyncGenerator<T>(
 
 describe('AsyncIterableRegistry', () => {
   let registry: AsyncIterableRegistry<any>;
-  let subscription: AsyncGenerator<any, void, void>;
+  let subscription: SimpleAsyncGenerator<any>;
 
   beforeEach(() => {
     registry = new AsyncIterableRegistry();
@@ -42,7 +43,7 @@ describe('AsyncIterableRegistry', () => {
 
   describe('yielding values from a single source', () => {
     it('should yield values in order from an async generator added to the registry', async () => {
-      const gen = createAsyncGenerator([1, 2, 3], 5);
+      const gen = createSimpleAsyncGenerator([1, 2, 3], 5);
       registry.add(gen);
       const res1 = await subscription.next();
       expect(res1).to.deep.equal({ value: 1, done: false });
@@ -57,8 +58,8 @@ describe('AsyncIterableRegistry', () => {
 
   describe('yielding values from multiple sources', () => {
     it('should yield interleaved values from multiple async generators added to the registry', async () => {
-      const gen1 = createAsyncGenerator([1, 3, 5], 20, 0);
-      const gen2 = createAsyncGenerator([2, 4, 6], 20, 15);
+      const gen1 = createSimpleAsyncGenerator([1, 3, 5], 20, 0);
+      const gen2 = createSimpleAsyncGenerator([2, 4, 6], 20, 15);
       registry.add(gen1);
       registry.add(gen2);
       const values: Array<number> = [];
@@ -97,7 +98,7 @@ describe('AsyncIterableRegistry', () => {
 
   describe('buffering extra results', () => {
     it('should buffer extra results when produced and deliver them on subsequent next calls', async () => {
-      const gen = createAsyncGenerator([10, 20, 30], 0);
+      const gen = createSimpleAsyncGenerator([10, 20, 30], 0);
       registry.add(gen);
       const res1 = await subscription.next();
       expect(res1).to.deep.equal({ value: 10, done: false });
@@ -112,7 +113,7 @@ describe('AsyncIterableRegistry', () => {
 
   describe('completion and flushing', () => {
     it('should complete and flush pending nextQueue when all sources are done', async () => {
-      const gen = createAsyncGenerator([100], 5);
+      const gen = createSimpleAsyncGenerator([100], 5);
       registry.add(gen);
       const promise1 = subscription.next();
       const res1 = await promise1;
@@ -183,7 +184,7 @@ describe('AsyncIterableRegistry', () => {
 
   describe('concurrent next() calls', () => {
     it('should resolve two concurrent next() calls correctly', async () => {
-      const gen = createAsyncGenerator([1, 2, 3], 10);
+      const gen = createSimpleAsyncGenerator([1, 2, 3], 10);
       registry.add(gen);
       const promise1 = subscription.next();
       const promise2 = subscription.next();

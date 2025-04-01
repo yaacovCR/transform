@@ -5,7 +5,6 @@ import type {
   GraphQLNullableOutputType,
   GraphQLObjectType,
   GraphQLOutputType,
-  SubsequentIncrementalExecutionResult,
   ValidatedExecutionArgs,
 } from 'graphql';
 import {
@@ -54,36 +53,33 @@ import type {
   DeferredFragment,
   ExecutionGroupResult,
   IncrementalDataRecord,
+  IncrementalResults,
   PendingExecutionGroup,
   Stream,
   StreamItemResult,
 } from './types.js';
 
-interface IncrementalContext {
+interface IncrementalContext<TInitial, TSubsequent> {
   deferUsageSet: DeferUsageSet | undefined;
   newErrors: Map<Path | undefined, GraphQLError>;
   originalErrors: Array<GraphQLError>;
-  foundPathScopedObjects: ObjMap<ObjMap<FoundPathScopedObjects>>;
-  deferredFragments: Array<DeferredFragment>;
-  incrementalDataRecords: Array<IncrementalDataRecord>;
-  extendedSubsequentResults: Array<ExtendedSubsequentResults>;
+  foundPathScopedObjects: ObjMap<
+    ObjMap<FoundPathScopedObjects<TInitial, TSubsequent>>
+  >;
+  deferredFragments: Array<
+    DeferredFragment<IncrementalResults<TInitial, TSubsequent>>
+  >;
+  incrementalDataRecords: Array<
+    IncrementalDataRecord<IncrementalResults<TInitial, TSubsequent>>
+  >;
 }
 
-interface FoundPathScopedObjects {
+interface FoundPathScopedObjects<TInitial, TSubsequent> {
   objects: Array<ObjMap<unknown>>;
   paths: Array<Path>;
-  extender: ObjectBatchExtender;
+  extender: ObjectBatchExtender<TInitial, TSubsequent>;
   type: GraphQLObjectType;
   fieldDetailsList: ReadonlyArray<FieldDetails>;
-}
-
-interface ExtendedSubsequentResults {
-  path: ReadonlyArray<string | number>;
-  subsequentResults: AsyncGenerator<
-    SubsequentIncrementalExecutionResult,
-    void,
-    void
-  >;
 }
 
 interface StreamUsage {
@@ -110,23 +106,29 @@ const collectSubfields = memoize3(
   },
 );
 
-export function completeInitialResult(
-  context: TransformationContext,
+export function completeInitialResult<
+  TInitial extends ExecutionResult,
+  TSubsequent,
+>(
+  context: TransformationContext<TInitial, TSubsequent>,
   originalData: ObjMap<unknown>,
 ): PromiseOrValue<{
   data: ObjMap<unknown>;
   errors: ReadonlyArray<GraphQLError>;
-  deferredFragments: ReadonlyArray<DeferredFragment>;
-  incrementalDataRecords: ReadonlyArray<IncrementalDataRecord>;
+  deferredFragments: ReadonlyArray<
+    DeferredFragment<IncrementalResults<TInitial, TSubsequent>>
+  >;
+  incrementalDataRecords: ReadonlyArray<
+    IncrementalDataRecord<IncrementalResults<TInitial, TSubsequent>>
+  >;
 }> {
-  const incrementalContext: IncrementalContext = {
+  const incrementalContext: IncrementalContext<TInitial, TSubsequent> = {
     deferUsageSet: undefined,
     newErrors: new Map(),
     originalErrors: [],
     foundPathScopedObjects: Object.create(null),
     deferredFragments: [],
     incrementalDataRecords: [],
-    extendedSubsequentResults: [],
   };
 
   const { schema, operation, fragments, variableValues, hideSuggestions } =
@@ -187,14 +189,18 @@ export function completeInitialResult(
   return buildInitialResult(incrementalContext, completed);
 }
 
-function buildInitialResult(
-  incrementalContext: IncrementalContext,
+function buildInitialResult<TInitial, TSubsequent>(
+  incrementalContext: IncrementalContext<TInitial, TSubsequent>,
   completed: ObjMap<unknown>,
 ): {
   data: ObjMap<unknown>;
   errors: ReadonlyArray<GraphQLError>;
-  deferredFragments: ReadonlyArray<DeferredFragment>;
-  incrementalDataRecords: ReadonlyArray<IncrementalDataRecord>;
+  deferredFragments: ReadonlyArray<
+    DeferredFragment<IncrementalResults<TInitial, TSubsequent>>
+  >;
+  incrementalDataRecords: ReadonlyArray<
+    IncrementalDataRecord<IncrementalResults<TInitial, TSubsequent>>
+  >;
 } {
   const {
     newErrors,
@@ -220,8 +226,8 @@ function buildInitialResult(
   };
 }
 
-function extendObjects(
-  incrementalContext: IncrementalContext,
+function extendObjects<TInitial extends ExecutionResult, TSubsequent>(
+  incrementalContext: IncrementalContext<TInitial, TSubsequent>,
   completed: unknown,
   initialPath: Path | undefined,
 ): PromiseOrValue<void> {
@@ -247,10 +253,10 @@ function extendObjects(
   }
 }
 
-function extendObjectsOfType(
+function extendObjectsOfType<TInitial extends ExecutionResult, TSubsequent>(
   promises: Array<Promise<void>>,
-  incrementalContext: IncrementalContext,
-  foundPathScopedObjects: FoundPathScopedObjects,
+  incrementalContext: IncrementalContext<TInitial, TSubsequent>,
+  foundPathScopedObjects: FoundPathScopedObjects<TInitial, TSubsequent>,
   completed: ObjMap<unknown>,
   initialPath: Path | undefined,
 ): void {
@@ -304,9 +310,11 @@ function extendObjectsOfType(
 }
 
 // eslint-disable-next-line @typescript-eslint/max-params
-function updateObjects(
-  incrementalContext: IncrementalContext,
-  results: ReadonlyArray<ExecutionResult>,
+function updateObjects<TInitial extends ExecutionResult, TSubsequent>(
+  incrementalContext: IncrementalContext<TInitial, TSubsequent>,
+  results: ReadonlyArray<
+    ExecutionResult | IncrementalResults<TInitial, TSubsequent>
+  >,
   fieldDetailsList: ReadonlyArray<FieldDetails>,
   completed: ObjMap<unknown>,
   paths: ReadonlyArray<Path>,
@@ -318,32 +326,67 @@ function updateObjects(
     const pathArr = pathToArray(paths[i]).slice(initialPathLength);
     const incompleteAtPath = getObjectAtPath(completed, pathArr);
     invariant(!Array.isArray(incompleteAtPath));
-    const { data, errors } = result;
-    if (data) {
-      for (const [key, value] of Object.entries(data)) {
-        incompleteAtPath[key] = value;
-      }
-      if (errors) {
-        incrementalContext.originalErrors.push(
-          ...errors.map((error) => prependPath(error, pathArr)),
-        );
-      }
-    } else {
-      invariant(errors !== undefined);
-      const error = locatedError(
-        new AggregateError(
-          errors,
-          'Fatal GraphQL error(s) occurred while resolving a batched object.',
-        ),
-        fieldDetailsList.map((f) => f.node),
+    if ('initialResult' in result) {
+      handleInitialResult(
+        incrementalContext,
+        result.initialResult,
+        fieldDetailsList,
+        incompleteAtPath,
+        paths[i],
         pathArr,
       );
-      incrementalContext.newErrors.set(paths[i], error);
+      incrementalContext.incrementalDataRecords.push({
+        stream: result,
+        path: paths[i],
+        initialPath: pathArr,
+      });
+      continue;
     }
+    handleInitialResult(
+      incrementalContext,
+      result,
+      fieldDetailsList,
+      incompleteAtPath,
+      paths[i],
+      pathArr,
+    );
   }
 }
 
-function prependPath(
+// eslint-disable-next-line @typescript-eslint/max-params
+function handleInitialResult<TInitial extends ExecutionResult, TSubsequent>(
+  incrementalContext: IncrementalContext<TInitial, TSubsequent>,
+  result: ExecutionResult | TInitial,
+  fieldDetailsList: ReadonlyArray<FieldDetails>,
+  incompleteAtPath: ObjMap<unknown>,
+  path: Path | undefined,
+  pathArr: ReadonlyArray<string | number>,
+): void {
+  const { data, errors } = result;
+  if (data) {
+    for (const [key, value] of Object.entries(data)) {
+      incompleteAtPath[key] = value;
+    }
+    if (errors) {
+      incrementalContext.originalErrors.push(
+        ...errors.map((error) => prependErrorWithPath(error, pathArr)),
+      );
+    }
+  } else {
+    invariant(errors !== undefined);
+    const error = locatedError(
+      new AggregateError(
+        errors,
+        'Fatal GraphQL error(s) occurred while resolving a batched object.',
+      ),
+      fieldDetailsList.map((f) => f.node),
+      pathArr,
+    );
+    incrementalContext.newErrors.set(path, error);
+  }
+}
+
+function prependErrorWithPath(
   error: GraphQLError,
   pathArr: ReadonlyArray<string | number>,
 ): GraphQLError {
@@ -358,8 +401,8 @@ function prependPath(
 }
 
 // eslint-disable-next-line @typescript-eslint/max-params
-function nullObjects(
-  incrementalContext: IncrementalContext,
+function nullObjects<TInitial, TSubsequent>(
+  incrementalContext: IncrementalContext<TInitial, TSubsequent>,
   rawError: unknown,
   fieldDetailsList: ReadonlyArray<FieldDetails>,
   completed: ObjMap<unknown>,
@@ -381,15 +424,20 @@ function nullObjects(
 }
 
 // eslint-disable-next-line @typescript-eslint/max-params
-function completeValue(
-  context: TransformationContext,
+function completeValue<TInitial extends ExecutionResult, TSubsequent>(
+  context: TransformationContext<TInitial, TSubsequent>,
   nullableType: GraphQLNullableOutputType,
   fieldDetailsList: ReadonlyArray<FieldDetails>,
   result: unknown,
   path: Path,
   pathStr: string,
-  incrementalContext: IncrementalContext,
-  deferMap: ReadonlyMap<DeferUsage, DeferredFragment> | undefined,
+  incrementalContext: IncrementalContext<TInitial, TSubsequent>,
+  deferMap:
+    | ReadonlyMap<
+        DeferUsage,
+        DeferredFragment<IncrementalResults<TInitial, TSubsequent>>
+      >
+    | undefined,
 ): unknown {
   if (result == null) {
     return null;
@@ -515,13 +563,13 @@ function completeValue(
 }
 
 // eslint-disable-next-line @typescript-eslint/max-params
-function transformLeafValue(
+function transformLeafValue<TInitial, TSubsequent>(
   leafTransformer: LeafTransformer,
   type: GraphQLLeafType,
   fieldDetailsList: ReadonlyArray<FieldDetails>,
   value: unknown,
   path: Path,
-  incrementalContext: IncrementalContext,
+  incrementalContext: IncrementalContext<TInitial, TSubsequent>,
 ): PromiseOrValue<unknown> {
   try {
     const transformed = leafTransformer(value, type, path);
@@ -544,11 +592,11 @@ function transformLeafValue(
   }
 }
 
-function handleRawError(
+function handleRawError<TInitial, TSubsequent>(
   rawError: unknown,
   fieldDetailsList: ReadonlyArray<FieldDetails>,
   path: Path,
-  incrementalContext: IncrementalContext,
+  incrementalContext: IncrementalContext<TInitial, TSubsequent>,
 ): null {
   const error = locatedError(
     rawError,
@@ -560,15 +608,20 @@ function handleRawError(
 }
 
 // eslint-disable-next-line @typescript-eslint/max-params
-function completeObjectValue(
-  context: TransformationContext,
+function completeObjectValue<TInitial extends ExecutionResult, TSubsequent>(
+  context: TransformationContext<TInitial, TSubsequent>,
   groupedFieldSet: GroupedFieldSet,
   runtimeType: GraphQLObjectType,
   originalData: ObjMap<unknown>,
   path: Path | undefined,
   pathStr: string,
-  incrementalContext: IncrementalContext,
-  deferMap: ReadonlyMap<DeferUsage, DeferredFragment> | undefined,
+  incrementalContext: IncrementalContext<TInitial, TSubsequent>,
+  deferMap:
+    | ReadonlyMap<
+        DeferUsage,
+        DeferredFragment<IncrementalResults<TInitial, TSubsequent>>
+      >
+    | undefined,
 ): ObjMap<unknown> {
   const {
     argsWithNewLabels: { schema },
@@ -622,13 +675,13 @@ function completeObjectValue(
 }
 
 // eslint-disable-next-line @typescript-eslint/max-params
-function transformFieldValue(
+function transformFieldValue<TInitial, TSubsequent>(
   fieldTransformer: FieldTransformer,
   fieldDef: GraphQLField,
   fieldDetailsList: ReadonlyArray<FieldDetails>,
   value: unknown,
   path: Path,
-  incrementalContext: IncrementalContext,
+  incrementalContext: IncrementalContext<TInitial, TSubsequent>,
 ): PromiseOrValue<unknown> {
   try {
     const transformed = fieldTransformer(value, fieldDef, path);
@@ -651,15 +704,20 @@ function transformFieldValue(
 }
 
 // eslint-disable-next-line @typescript-eslint/max-params
-function completeListValue(
-  context: TransformationContext,
+function completeListValue<TInitial extends ExecutionResult, TSubsequent>(
+  context: TransformationContext<TInitial, TSubsequent>,
   itemType: GraphQLOutputType,
   fieldDetailsList: ReadonlyArray<FieldDetails>,
   result: ReadonlyArray<unknown>,
   path: Path,
   pathStr: string,
-  incrementalContext: IncrementalContext,
-  deferMap: ReadonlyMap<DeferUsage, DeferredFragment> | undefined,
+  incrementalContext: IncrementalContext<TInitial, TSubsequent>,
+  deferMap:
+    | ReadonlyMap<
+        DeferUsage,
+        DeferredFragment<IncrementalResults<TInitial, TSubsequent>>
+      >
+    | undefined,
 ): Array<unknown> {
   const streamUsage = getStreamUsage(context, fieldDetailsList, path);
   const completedItems = [];
@@ -710,13 +768,19 @@ function completeListValue(
   return completedItems;
 }
 
-function getNewDeferMap(
-  context: TransformationContext,
-  incrementalContext: IncrementalContext,
+function getNewDeferMap<TInitial, TSubsequent>(
+  context: TransformationContext<TInitial, TSubsequent>,
+  incrementalContext: IncrementalContext<TInitial, TSubsequent>,
   newDeferUsages: ReadonlyArray<DeferUsage>,
-  deferMap?: ReadonlyMap<DeferUsage, DeferredFragment>,
+  deferMap?: ReadonlyMap<
+    DeferUsage,
+    DeferredFragment<IncrementalResults<TInitial, TSubsequent>>
+  >,
   path?: Path,
-): ReadonlyMap<DeferUsage, DeferredFragment> {
+): ReadonlyMap<
+  DeferUsage,
+  DeferredFragment<IncrementalResults<TInitial, TSubsequent>>
+> {
   const deferredFragments = incrementalContext.deferredFragments;
   const newDeferMap = new Map(deferMap);
 
@@ -734,7 +798,9 @@ function getNewDeferMap(
 
     const pathStr = pathToArray(path).join('.');
     // Instantiate the new record.
-    const deferredFragment: DeferredFragment = {
+    const deferredFragment: DeferredFragment<
+      IncrementalResults<TInitial, TSubsequent>
+    > = {
       path,
       label,
       pathStr,
@@ -757,16 +823,19 @@ function getNewDeferMap(
   return newDeferMap;
 }
 
-function deferredFragmentRecordFromDeferUsage(
+function deferredFragmentRecordFromDeferUsage<TInitial, TSubsequent>(
   deferUsage: DeferUsage,
-  deferMap: ReadonlyMap<DeferUsage, DeferredFragment>,
-): DeferredFragment {
+  deferMap: ReadonlyMap<
+    DeferUsage,
+    DeferredFragment<IncrementalResults<TInitial, TSubsequent>>
+  >,
+): DeferredFragment<IncrementalResults<TInitial, TSubsequent>> {
   // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
   return deferMap.get(deferUsage)!;
 }
 
-function buildSubExecutionPlan(
-  context: TransformationContext,
+function buildSubExecutionPlan<TInitial, TSubsequent>(
+  context: TransformationContext<TInitial, TSubsequent>,
   originalGroupedFieldSet: GroupedFieldSet,
   deferUsageSet: DeferUsageSet | undefined,
 ): ExecutionPlan {
@@ -787,24 +856,30 @@ function buildSubExecutionPlan(
 }
 
 // eslint-disable-next-line @typescript-eslint/max-params
-function collectExecutionGroups(
-  context: TransformationContext,
+function collectExecutionGroups<TInitial extends ExecutionResult, TSubsequent>(
+  context: TransformationContext<TInitial, TSubsequent>,
   runtimeType: GraphQLObjectType,
   result: ObjMap<unknown>,
   path: Path | undefined,
   pathStr: string,
   newGroupedFieldSets: Map<DeferUsageSet, GroupedFieldSet>,
-  incrementalContext: IncrementalContext,
-  deferMap: ReadonlyMap<DeferUsage, DeferredFragment>,
+  incrementalContext: IncrementalContext<TInitial, TSubsequent>,
+  deferMap: ReadonlyMap<
+    DeferUsage,
+    DeferredFragment<IncrementalResults<TInitial, TSubsequent>>
+  >,
 ): void {
   for (const [deferUsageSet, groupedFieldSet] of newGroupedFieldSets) {
     const deferredFragments = getDeferredFragments(deferUsageSet, deferMap);
 
-    const pendingExecutionGroup: PendingExecutionGroup = {
+    const pendingExecutionGroup: PendingExecutionGroup<
+      IncrementalResults<TInitial, TSubsequent>
+    > = {
       path,
       deferredFragments,
-      result:
-        undefined as unknown as () => BoxedPromiseOrValue<ExecutionGroupResult>,
+      result: undefined as unknown as () => BoxedPromiseOrValue<
+        ExecutionGroupResult<IncrementalResults<TInitial, TSubsequent>>
+      >,
     };
 
     pendingExecutionGroup.result = () =>
@@ -824,7 +899,6 @@ function collectExecutionGroups(
             foundPathScopedObjects: Object.create(null),
             deferredFragments: [],
             incrementalDataRecords: [],
-            extendedSubsequentResults: [],
           },
           deferMap,
         ),
@@ -834,27 +908,37 @@ function collectExecutionGroups(
   }
 }
 
-function getDeferredFragments(
+function getDeferredFragments<TInitial, TSubsequent>(
   deferUsages: DeferUsageSet,
-  deferMap: ReadonlyMap<DeferUsage, DeferredFragment>,
-): ReadonlyArray<DeferredFragment> {
+  deferMap: ReadonlyMap<
+    DeferUsage,
+    DeferredFragment<IncrementalResults<TInitial, TSubsequent>>
+  >,
+): ReadonlyArray<DeferredFragment<IncrementalResults<TInitial, TSubsequent>>> {
   return Array.from(deferUsages).map((deferUsage) =>
     deferredFragmentRecordFromDeferUsage(deferUsage, deferMap),
   );
 }
 
 // eslint-disable-next-line @typescript-eslint/max-params
-function executeExecutionGroup(
-  context: TransformationContext,
-  pendingExecutionGroup: PendingExecutionGroup,
+function executeExecutionGroup<TInitial extends ExecutionResult, TSubsequent>(
+  context: TransformationContext<TInitial, TSubsequent>,
+  pendingExecutionGroup: PendingExecutionGroup<
+    IncrementalResults<TInitial, TSubsequent>
+  >,
   result: ObjMap<unknown>,
   path: Path | undefined,
   pathStr: string,
   groupedFieldSet: GroupedFieldSet,
   runtimeType: GraphQLObjectType,
-  incrementalContext: IncrementalContext,
-  deferMap: ReadonlyMap<DeferUsage, DeferredFragment>,
-): PromiseOrValue<ExecutionGroupResult> {
+  incrementalContext: IncrementalContext<TInitial, TSubsequent>,
+  deferMap: ReadonlyMap<
+    DeferUsage,
+    DeferredFragment<IncrementalResults<TInitial, TSubsequent>>
+  >,
+): PromiseOrValue<
+  ExecutionGroupResult<IncrementalResults<TInitial, TSubsequent>>
+> {
   const completed = completeObjectValue(
     context,
     groupedFieldSet,
@@ -884,11 +968,13 @@ function executeExecutionGroup(
   );
 }
 
-function buildExecutionGroupResult(
-  incrementalContext: IncrementalContext,
+function buildExecutionGroupResult<TInitial, TSubsequent>(
+  incrementalContext: IncrementalContext<TInitial, TSubsequent>,
   completed: ObjMap<unknown>,
-  pendingExecutionGroup: PendingExecutionGroup,
-): ExecutionGroupResult {
+  pendingExecutionGroup: PendingExecutionGroup<
+    IncrementalResults<TInitial, TSubsequent>
+  >,
+): ExecutionGroupResult<IncrementalResults<TInitial, TSubsequent>> {
   const {
     newErrors,
     originalErrors,
@@ -912,8 +998,8 @@ function buildExecutionGroupResult(
   };
 }
 
-function getStreamUsage(
-  context: TransformationContext,
+function getStreamUsage<TInitial, TSubsequent>(
+  context: TransformationContext<TInitial, TSubsequent>,
   fieldDetailsList: ReadonlyArray<FieldDetails>,
   path: Path,
 ): StreamUsage | undefined {
@@ -945,8 +1031,8 @@ function getStreamUsage(
 }
 
 // eslint-disable-next-line @typescript-eslint/max-params
-function maybeAddStream(
-  context: TransformationContext,
+function maybeAddStream<TInitial extends ExecutionResult, TSubsequent>(
+  context: TransformationContext<TInitial, TSubsequent>,
   streamUsage: StreamUsage,
   itemType: GraphQLOutputType,
   fieldDetailsList: ReadonlyArray<FieldDetails>,
@@ -954,12 +1040,12 @@ function maybeAddStream(
   path: Path,
   pathStr: string,
   nextIndex: number,
-  incrementalContext: IncrementalContext,
+  incrementalContext: IncrementalContext<TInitial, TSubsequent>,
 ): void {
   const label = streamUsage.label;
   const originalLabel = context.originalLabels.get(label);
 
-  const stream: Stream = {
+  const stream: Stream<IncrementalResults<TInitial, TSubsequent>> = {
     path,
     label,
     pathStr: pathToArray(path).join('.'),
@@ -969,7 +1055,9 @@ function maybeAddStream(
     publishedItems: nextIndex,
     result: undefined as unknown as (
       index: number,
-    ) => BoxedPromiseOrValue<StreamItemResult>,
+    ) => BoxedPromiseOrValue<
+      StreamItemResult<IncrementalResults<TInitial, TSubsequent>>
+    >,
     streamItemQueue: [],
     pending: false,
   };
@@ -994,7 +1082,6 @@ function maybeAddStream(
           foundPathScopedObjects: Object.create(null),
           deferredFragments: [],
           incrementalDataRecords: [],
-          extendedSubsequentResults: [],
         },
       ),
     );
@@ -1003,16 +1090,16 @@ function maybeAddStream(
 }
 
 // eslint-disable-next-line @typescript-eslint/max-params
-function executeStreamItem(
-  context: TransformationContext,
+function executeStreamItem<TInitial extends ExecutionResult, TSubsequent>(
+  context: TransformationContext<TInitial, TSubsequent>,
   result: ReadonlyArray<unknown>,
   itemType: GraphQLOutputType,
   fieldDetailsList: ReadonlyArray<FieldDetails>,
   path: Path,
   pathStr: string,
   index: number,
-  incrementalContext: IncrementalContext,
-): PromiseOrValue<StreamItemResult> {
+  incrementalContext: IncrementalContext<TInitial, TSubsequent>,
+): PromiseOrValue<StreamItemResult<IncrementalResults<TInitial, TSubsequent>>> {
   const nullableType = getNullableType(itemType);
   const itemPath = addPath(path, index, nullableType === itemType);
   const completed = completeValue(
@@ -1036,11 +1123,11 @@ function executeStreamItem(
   return buildStreamItemResult(incrementalContext, completed, path);
 }
 
-function buildStreamItemResult(
-  incrementalContext: IncrementalContext,
+function buildStreamItemResult<TInitial, TSubsequent>(
+  incrementalContext: IncrementalContext<TInitial, TSubsequent>,
   completed: unknown,
   path: Path,
-): StreamItemResult {
+): StreamItemResult<IncrementalResults<TInitial, TSubsequent>> {
   const {
     newErrors,
     originalErrors,

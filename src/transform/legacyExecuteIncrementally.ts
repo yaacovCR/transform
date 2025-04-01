@@ -3,6 +3,7 @@ import type { ExecutionArgs, ExecutionResult, GraphQLError } from 'graphql';
 import type { ObjMap } from '../jsutils/ObjMap.js';
 import { pathToArray } from '../jsutils/Path.js';
 import type { PromiseOrValue } from '../jsutils/PromiseOrValue.js';
+import type { SimpleAsyncGenerator } from '../jsutils/SimpleAsyncGenerator.js';
 
 import { buildBranchingExecutionPlan } from './buildBranchingExecutionPlan.js';
 import type {
@@ -13,6 +14,7 @@ import { transformResult } from './transformResult.js';
 import type {
   DeferredFragment,
   ExecutionGroupResult,
+  ExternalStream,
   Stream,
   StreamItemsResult,
   SubsequentResultRecord,
@@ -20,11 +22,7 @@ import type {
 
 export interface LegacyExperimentalIncrementalExecutionResults {
   initialResult: LegacyInitialIncrementalExecutionResult;
-  subsequentResults: AsyncGenerator<
-    LegacySubsequentIncrementalExecutionResult,
-    void,
-    void
-  >;
+  subsequentResults: SimpleAsyncGenerator<LegacySubsequentIncrementalExecutionResult>;
 }
 
 export interface LegacyInitialIncrementalExecutionResult
@@ -70,15 +68,18 @@ export function legacyExecuteIncrementally(
 }
 
 function getLegacyPayloadPublisher(): PayloadPublisher<
-  LegacySubsequentIncrementalExecutionResult,
-  LegacyExperimentalIncrementalExecutionResults
+  LegacyInitialIncrementalExecutionResult,
+  LegacySubsequentIncrementalExecutionResult
 > {
   return {
     getSubsequentPayloadPublisher,
     getPayloads,
   };
 
-  function getSubsequentPayloadPublisher(): SubsequentPayloadPublisher<LegacySubsequentIncrementalExecutionResult> {
+  function getSubsequentPayloadPublisher(): SubsequentPayloadPublisher<
+    LegacyInitialIncrementalExecutionResult,
+    LegacySubsequentIncrementalExecutionResult
+  > {
     let incremental: Array<LegacyIncrementalResult> = [];
 
     return {
@@ -87,11 +88,12 @@ function getLegacyPayloadPublisher(): PayloadPublisher<
       addFailedStream,
       addSuccessfulStream,
       addStreamItems,
+      addExternalStream,
       getSubsequentPayload,
     };
 
     function addFailedDeferredFragment(
-      deferredFragment: DeferredFragment,
+      deferredFragment: DeferredFragment<LegacyExperimentalIncrementalExecutionResults>,
       errors: ReadonlyArray<GraphQLError>,
     ): void {
       const { path, originalLabel } = deferredFragment;
@@ -110,9 +112,13 @@ function getLegacyPayloadPublisher(): PayloadPublisher<
     }
 
     function addSuccessfulDeferredFragment(
-      deferredFragment: DeferredFragment,
-      _newRootNodes: ReadonlyArray<SubsequentResultRecord>,
-      executionGroupResults: ReadonlyArray<ExecutionGroupResult>,
+      deferredFragment: DeferredFragment<LegacyExperimentalIncrementalExecutionResults>,
+      _newRootNodes: ReadonlyArray<
+        SubsequentResultRecord<LegacyExperimentalIncrementalExecutionResults>
+      >,
+      executionGroupResults: ReadonlyArray<
+        ExecutionGroupResult<LegacyExperimentalIncrementalExecutionResults>
+      >,
     ): void {
       for (const executionGroupResult of executionGroupResults) {
         const { path, originalLabel } = deferredFragment;
@@ -132,7 +138,7 @@ function getLegacyPayloadPublisher(): PayloadPublisher<
     }
 
     function addFailedStream(
-      stream: Stream,
+      stream: Stream<LegacyExperimentalIncrementalExecutionResults>,
       errors: ReadonlyArray<GraphQLError>,
       index: number,
     ): void {
@@ -155,9 +161,11 @@ function getLegacyPayloadPublisher(): PayloadPublisher<
     }
 
     function addStreamItems(
-      stream: Stream,
-      _newRootNodes: ReadonlyArray<SubsequentResultRecord>,
-      streamItemsResult: StreamItemsResult,
+      stream: Stream<LegacyExperimentalIncrementalExecutionResults>,
+      _newRootNodes: ReadonlyArray<
+        SubsequentResultRecord<LegacyExperimentalIncrementalExecutionResults>
+      >,
+      streamItemsResult: StreamItemsResult<LegacyExperimentalIncrementalExecutionResults>,
       index: number,
     ): void {
       const { path, originalLabel } = stream;
@@ -174,6 +182,10 @@ function getLegacyPayloadPublisher(): PayloadPublisher<
       }
       incremental.push(newIncrementalResult);
     }
+
+    function addExternalStream(
+      externalStream: ExternalStream<LegacyExperimentalIncrementalExecutionResults>,
+    ) {}
 
     function getSubsequentPayload(
       hasNext: boolean,
@@ -200,12 +212,10 @@ function getLegacyPayloadPublisher(): PayloadPublisher<
   function getPayloads(
     data: ObjMap<unknown>,
     errors: ReadonlyArray<GraphQLError>,
-    _newRootNodes: ReadonlyArray<SubsequentResultRecord>,
-    subsequentResults: AsyncGenerator<
-      LegacySubsequentIncrementalExecutionResult,
-      void,
-      void
+    _newRootNodes: ReadonlyArray<
+      SubsequentResultRecord<LegacyExperimentalIncrementalExecutionResults>
     >,
+    subsequentResults: SimpleAsyncGenerator<LegacySubsequentIncrementalExecutionResult>,
   ): LegacyExperimentalIncrementalExecutionResults {
     return {
       initialResult:

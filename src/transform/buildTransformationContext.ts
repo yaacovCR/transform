@@ -18,6 +18,7 @@ import type { PromiseOrValue } from '../jsutils/PromiseOrValue.js';
 
 import { addNewLabels } from './addNewLabels.js';
 import type { DeferUsageSet, ExecutionPlan } from './buildExecutionPlan.js';
+import type { IncrementalResults } from './types.js';
 
 export type ExecutionPlanBuilder = (
   originalGroupedFieldSet: GroupedFieldSet,
@@ -44,38 +45,48 @@ type LeafTransformers = ObjMap<LeafTransformer>;
 
 type PathScopedFieldTransformers = ObjMap<FieldTransformer>;
 
-type PathScopedObjectBatchExtenders = ObjMap<ObjMap<ObjectBatchExtender>>;
+type PathScopedObjectBatchExtenders<TInitial, TSubsequent> = ObjMap<
+  ObjMap<ObjectBatchExtender<TInitial, TSubsequent>>
+>;
 
-export type ObjectBatchExtender = (
+export type ObjectBatchExtender<TInitial, TSubsequent> = (
   objects: ReadonlyArray<ObjMap<unknown>>,
   type: GraphQLObjectType,
   fieldDetailsList: ReadonlyArray<FieldDetails>,
-) => PromiseOrValue<ReadonlyArray<ExecutionResult>>;
+) => PromiseOrValue<
+  ReadonlyArray<ExecutionResult | IncrementalResults<TInitial, TSubsequent>>
+>;
 
-export interface Transformers {
+export interface Transformers<TInitial, TSubsequent> {
   pathScopedFieldTransformers?: PathScopedFieldTransformers;
   objectFieldTransformers?: ObjectFieldTransformers;
   leafTransformers?: LeafTransformers;
-  pathScopedObjectBatchExtenders?: PathScopedObjectBatchExtenders;
+  pathScopedObjectBatchExtenders?: PathScopedObjectBatchExtenders<
+    TInitial,
+    TSubsequent
+  >;
 }
 
-export interface TransformationContext {
+export interface TransformationContext<TInitial, TSubsequent> {
   argsWithNewLabels: ValidatedExecutionArgs;
   originalLabels: Map<string, string | undefined>;
   pathScopedFieldTransformers: PathScopedFieldTransformers;
   objectFieldTransformers: ObjectFieldTransformers;
   leafTransformers: LeafTransformers;
-  pathScopedObjectBatchExtenders: PathScopedObjectBatchExtenders;
+  pathScopedObjectBatchExtenders: PathScopedObjectBatchExtenders<
+    TInitial,
+    TSubsequent
+  >;
   executionPlanBuilder: ExecutionPlanBuilder;
   prefix: string;
 }
 
-export function buildTransformationContext(
+export function buildTransformationContext<TInitial, TSubsequent>(
   originalArgs: ValidatedExecutionArgs,
-  transformers: Transformers,
+  transformers: Transformers<TInitial, TSubsequent>,
   executionPlanBuilder: ExecutionPlanBuilder,
   prefix: string,
-): TransformationContext {
+): TransformationContext<TInitial, TSubsequent> {
   const { argsWithNewLabels, originalLabels } = addNewLabels(
     prefix,
     originalArgs,

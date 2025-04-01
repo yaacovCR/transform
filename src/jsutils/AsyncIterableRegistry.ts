@@ -1,12 +1,13 @@
 import { promiseWithResolvers } from './promiseWithResolvers.js';
+import type { SimpleAsyncGenerator } from './SimpleAsyncGenerator.js';
 
 /**
  * @internal
  */
 export class AsyncIterableRegistry<T> {
   private _isDone: boolean;
-  private _sources: Set<AsyncGenerator<T, void, void>>;
-  private _sourcesToPoll: Set<AsyncGenerator<T, void, void>>;
+  private _sources: Set<SimpleAsyncGenerator<T>>;
+  private _sourcesToPoll: Set<SimpleAsyncGenerator<T>>;
   private _completedQueue: Array<IteratorResult<T>>;
   private _nextQueue: Array<(result: IteratorResult<T>) => void>;
 
@@ -18,7 +19,7 @@ export class AsyncIterableRegistry<T> {
     this._nextQueue = [];
   }
 
-  subscribe(): AsyncGenerator<T, void, void> {
+  subscribe(): SimpleAsyncGenerator<T> {
     return {
       [Symbol.asyncIterator]() {
         return this;
@@ -29,7 +30,7 @@ export class AsyncIterableRegistry<T> {
     };
   }
 
-  add(source: AsyncGenerator<T, void, void>): void {
+  add(source: SimpleAsyncGenerator<T>): void {
     this._sources.add(source);
     this._sourcesToPoll.add(source);
   }
@@ -55,7 +56,7 @@ export class AsyncIterableRegistry<T> {
     return promise;
   }
 
-  private _issueNext(source: AsyncGenerator<T, void, void>): void {
+  private _issueNext(source: SimpleAsyncGenerator<T>): void {
     this._sourcesToPoll.delete(source);
     source.next().then(
       (result) => this._onResult(source, result),
@@ -64,7 +65,7 @@ export class AsyncIterableRegistry<T> {
   }
 
   private _onResult(
-    source: AsyncGenerator<T, void, void>,
+    source: SimpleAsyncGenerator<T>,
     result: IteratorResult<T>,
   ): void {
     if (result.done) {
@@ -116,9 +117,7 @@ export class AsyncIterableRegistry<T> {
     this._nextQueue = [];
   }
 
-  private async _returnSource(
-    source: AsyncGenerator<T, void, void>,
-  ): Promise<void> {
+  private async _returnSource(source: SimpleAsyncGenerator<T>): Promise<void> {
     await source.return?.(undefined);
   }
 }

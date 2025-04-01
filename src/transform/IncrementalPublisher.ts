@@ -5,9 +5,9 @@ import type {
   // eslint-disable-next-line n/no-missing-import
 } from 'graphql/execution/types.js';
 
-import { AsyncIterableRegistry } from '../jsutils/AsyncIterableRegistry.js';
 import { invariant } from '../jsutils/invariant.js';
 import type { ObjMap } from '../jsutils/ObjMap.js';
+import type { SimpleAsyncGenerator } from '../jsutils/SimpleAsyncGenerator.js';
 
 import { IncrementalGraph } from './IncrementalGraph.js';
 import type { EncounteredPendingResult } from './MergedResult.js';
@@ -22,11 +22,17 @@ import type {
   FailedDeferredFragment,
   IncrementalDataRecord,
   IncrementalGraphEvent,
+  IncrementalResults,
   Stream,
   StreamItems,
   SubsequentResultRecord,
 } from './types.js';
-import { isStream } from './types.js';
+import {
+  isCompletedStreamItems,
+  isExecutionGroupResult,
+  isFailedDeferredFragment,
+  isStream,
+} from './types.js';
 
 /**
  * This class is used to publish incremental results to the client, enabling semi-concurrent
@@ -34,22 +40,24 @@ import { isStream } from './types.js';
  *
  * @internal
  */
-export class IncrementalPublisher<TSubsequent, TIncremental> {
+export class IncrementalPublisher<TInitial, TSubsequent> {
   private _isDone: boolean;
   private _mergedResult: MergedResult;
   private _subsequentResults:
-    | AsyncGenerator<SubsequentIncrementalExecutionResult>
+    | SimpleAsyncGenerator<SubsequentIncrementalExecutionResult>
     | undefined;
-  private _incrementalGraph: IncrementalGraph;
-  private _payloadPublisher: PayloadPublisher<TSubsequent, TIncremental>;
-  private _subsequentPayloadPublisher: SubsequentPayloadPublisher<TSubsequent>;
-  private _asyncIteratorRegistry: AsyncIterableRegistry<TSubsequent>;
+  private _incrementalGraph: IncrementalGraph<TInitial, TSubsequent>;
+  private _payloadPublisher: PayloadPublisher<TInitial, TSubsequent>;
+  private _subsequentPayloadPublisher: SubsequentPayloadPublisher<
+    TInitial,
+    TSubsequent
+  >;
 
   constructor(
     originalData: ObjMap<unknown>,
-    payloadPublisher: PayloadPublisher<TSubsequent, TIncremental>,
+    payloadPublisher: PayloadPublisher<TInitial, TSubsequent>,
     pending?: ReadonlyArray<PendingResult>,
-    subsequentResults?: AsyncGenerator<SubsequentIncrementalExecutionResult>,
+    subsequentResults?: SimpleAsyncGenerator<SubsequentIncrementalExecutionResult>,
   ) {
     this._isDone = false;
     this._mergedResult = new MergedResult(originalData);
@@ -62,23 +70,18 @@ export class IncrementalPublisher<TSubsequent, TIncremental> {
     this._payloadPublisher = payloadPublisher;
     this._subsequentPayloadPublisher =
       payloadPublisher.getSubsequentPayloadPublisher();
-    this._asyncIteratorRegistry = new AsyncIterableRegistry();
-    this._asyncIteratorRegistry.add({
-      [Symbol.asyncIterator]() {
-        return this;
-      },
-      next: () => this._next(),
-      return: () => this._return(),
-      throw: (error) => this._throw(error),
-    });
   }
 
   buildResponse(
     data: ObjMap<unknown>,
     errors: ReadonlyArray<GraphQLError>,
-    deferredFragments: ReadonlyArray<DeferredFragment>,
-    incrementalDataRecords: ReadonlyArray<IncrementalDataRecord>,
-  ): TIncremental {
+    deferredFragments: ReadonlyArray<
+      DeferredFragment<IncrementalResults<TInitial, TSubsequent>>
+    >,
+    incrementalDataRecords: ReadonlyArray<
+      IncrementalDataRecord<IncrementalResults<TInitial, TSubsequent>>
+    >,
+  ): IncrementalResults<TInitial, TSubsequent> {
     const newRootNodes = this._incrementalGraph.getNewRootNodes(
       deferredFragments,
       incrementalDataRecords,
@@ -95,7 +98,9 @@ export class IncrementalPublisher<TSubsequent, TIncremental> {
   }
 
   private _handleNewRootNodes(
-    newRootNodes: ReadonlyArray<SubsequentResultRecord>,
+    newRootNodes: ReadonlyArray<
+      SubsequentResultRecord<IncrementalResults<TInitial, TSubsequent>>
+    >,
   ): void {
     for (const newRootNode of newRootNodes) {
       const pendingResultsByPath = this._mergedResult.getPendingResultsByPath(
@@ -110,8 +115,15 @@ export class IncrementalPublisher<TSubsequent, TIncremental> {
     }
   }
 
-  private _subscribe(): AsyncGenerator<TSubsequent, void, void> {
-    return this._asyncIteratorRegistry.subscribe();
+  private _subscribe(): SimpleAsyncGenerator<TSubsequent> {
+    return {
+      [Symbol.asyncIterator]() {
+        return this;
+      },
+      next: () => this._next(),
+      return: () => this._return(),
+      throw: (error) => this._throw(error),
+    };
   }
 
   private async _next(): Promise<IteratorResult<TSubsequent, void>> {
@@ -122,15 +134,18 @@ export class IncrementalPublisher<TSubsequent, TIncremental> {
       return { value: undefined, done: true };
     }
 
-    let batch: Iterable<IncrementalGraphEvent> | undefined =
-      this._incrementalGraph.currentCompletedBatch();
+    let batch:
+      | Iterable<
+          IncrementalGraphEvent<IncrementalResults<TInitial, TSubsequent>>
+        >
+      | undefined = this._incrementalGraph.currentCompletedBatch();
     while (true) {
       for (const event of batch) {
-        if ('pendingExecutionGroup' in event) {
+        if (isExecutionGroupResult(event)) {
           this._handleCompletedExecutionGroup(event);
-        } else if ('stream' in event) {
+        } else if (isCompletedStreamItems(event)) {
           this._handleCompletedStreamItems(event);
-        } else {
+        } else if (isFailedDeferredFragment(event)) {
           this._handleFailedDeferredFragment(event);
         }
       }
@@ -160,7 +175,7 @@ export class IncrementalPublisher<TSubsequent, TIncremental> {
       // eslint-disable-next-line no-await-in-loop
       const next = await this._subsequentResults.next();
 
-      if (this._isDone) {
+      if (next.done || this._isDone) {
         return { value: undefined, done: true };
       }
 
@@ -189,7 +204,9 @@ export class IncrementalPublisher<TSubsequent, TIncremental> {
     return Promise.reject(error);
   }
 
-  private _handleCompletedStreamItems(streamItems: StreamItems): void {
+  private _handleCompletedStreamItems(
+    streamItems: StreamItems<IncrementalResults<TInitial, TSubsequent>>,
+  ): void {
     const { stream, errors, result } = streamItems;
     if (errors) {
       this._subsequentPayloadPublisher.addFailedStream(
@@ -221,7 +238,9 @@ export class IncrementalPublisher<TSubsequent, TIncremental> {
   }
 
   private _handleCompletedExecutionGroup(
-    executionGroupResult: ExecutionGroupResult,
+    executionGroupResult: ExecutionGroupResult<
+      IncrementalResults<TInitial, TSubsequent>
+    >,
   ): void {
     if (executionGroupResult.data === null) {
       for (const deferredFragment of executionGroupResult.pendingExecutionGroup
@@ -265,7 +284,9 @@ export class IncrementalPublisher<TSubsequent, TIncremental> {
   }
 
   private _handleFailedDeferredFragment(
-    failedDeferredFragment: FailedDeferredFragment,
+    failedDeferredFragment: FailedDeferredFragment<
+      IncrementalResults<TInitial, TSubsequent>
+    >,
   ): void {
     const { deferredFragment, errors } = failedDeferredFragment;
     // TODO: add test case for removing an already removed deferred fragment
@@ -282,7 +303,7 @@ export class IncrementalPublisher<TSubsequent, TIncremental> {
   }
 
   private _handleNewStream(
-    newRootNode: Stream,
+    newRootNode: Stream<IncrementalResults<TInitial, TSubsequent>>,
     pendingResultsByPath:
       | ReadonlyMap<string, EncounteredPendingResult>
       | undefined,
@@ -308,7 +329,7 @@ export class IncrementalPublisher<TSubsequent, TIncremental> {
   }
 
   private _handleNewDeferredFragment(
-    newRootNode: DeferredFragment,
+    newRootNode: DeferredFragment<IncrementalResults<TInitial, TSubsequent>>,
     pendingResultsByPath:
       | ReadonlyMap<string, EncounteredPendingResult>
       | undefined,
@@ -396,13 +417,13 @@ export class IncrementalPublisher<TSubsequent, TIncremental> {
   }
 
   private async _returnAsyncIterators(
-    subsequentResults: AsyncGenerator<SubsequentIncrementalExecutionResult>,
+    subsequentResults: SimpleAsyncGenerator<SubsequentIncrementalExecutionResult>,
   ): Promise<void> {
     await subsequentResults.return?.(undefined);
   }
 
   private async _returnAsyncIteratorsIgnoringErrors(
-    subsequentResults: AsyncGenerator<SubsequentIncrementalExecutionResult>,
+    subsequentResults: SimpleAsyncGenerator<SubsequentIncrementalExecutionResult>,
   ): Promise<void> {
     await this._returnAsyncIterators(subsequentResults).catch(() => {
       // Ignore errors

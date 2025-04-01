@@ -8,14 +8,18 @@ import type {
 } from 'graphql';
 import type {
   CompletedResult,
+  InitialIncrementalExecutionResult,
   PendingResult,
   // eslint-disable-next-line n/no-missing-import
 } from 'graphql/execution/types.js';
 
+import { AsyncIterableRegistry } from '../jsutils/AsyncIterableRegistry.js';
 import { invariant } from '../jsutils/invariant.js';
 import type { ObjMap } from '../jsutils/ObjMap.js';
 import { pathToArray } from '../jsutils/Path.js';
+import type { SimpleAsyncGenerator } from '../jsutils/SimpleAsyncGenerator.js';
 
+import { mapAsyncIterable } from './mapAsyncIterable.js';
 import type {
   PayloadPublisher,
   SubsequentPayloadPublisher,
@@ -23,24 +27,39 @@ import type {
 import type {
   DeferredFragment,
   ExecutionGroupResult,
+  ExternalStream,
   Stream,
   StreamItemsResult,
   SubsequentResultRecord,
 } from './types.js';
 
 export function getDefaultPayloadPublisher(): PayloadPublisher<
-  SubsequentIncrementalExecutionResult,
-  ExperimentalIncrementalExecutionResults
+  InitialIncrementalExecutionResult,
+  SubsequentIncrementalExecutionResult
 > {
-  const ids = new Map<SubsequentResultRecord, string>();
+  const ids = new Map<
+    SubsequentResultRecord<ExperimentalIncrementalExecutionResults>,
+    string
+  >();
   let nextId = 0;
+
+  const externalIds = new Map<
+    SimpleAsyncGenerator<SubsequentIncrementalExecutionResult>,
+    Map<string, string>
+  >();
+
+  const registry =
+    new AsyncIterableRegistry<SubsequentIncrementalExecutionResult>();
 
   return {
     getSubsequentPayloadPublisher,
     getPayloads,
   };
 
-  function getSubsequentPayloadPublisher(): SubsequentPayloadPublisher<SubsequentIncrementalExecutionResult> {
+  function getSubsequentPayloadPublisher(): SubsequentPayloadPublisher<
+    InitialIncrementalExecutionResult,
+    SubsequentIncrementalExecutionResult
+  > {
     let pending: Array<PendingResult> = [];
     let incremental: Array<IncrementalResult> = [];
     let completed: Array<CompletedResult> = [];
@@ -51,11 +70,12 @@ export function getDefaultPayloadPublisher(): PayloadPublisher<
       addFailedStream,
       addSuccessfulStream,
       addStreamItems,
+      addExternalStream,
       getSubsequentPayload,
     };
 
     function addFailedDeferredFragment(
-      deferredFragment: DeferredFragment,
+      deferredFragment: DeferredFragment<ExperimentalIncrementalExecutionResults>,
       errors: ReadonlyArray<GraphQLError>,
     ): void {
       const id = ids.get(deferredFragment);
@@ -68,9 +88,13 @@ export function getDefaultPayloadPublisher(): PayloadPublisher<
     }
 
     function addSuccessfulDeferredFragment(
-      deferredFragment: DeferredFragment,
-      newRootNodes: ReadonlyArray<SubsequentResultRecord>,
-      executionGroupResults: ReadonlyArray<ExecutionGroupResult>,
+      deferredFragment: DeferredFragment<ExperimentalIncrementalExecutionResults>,
+      newRootNodes: ReadonlyArray<
+        SubsequentResultRecord<ExperimentalIncrementalExecutionResults>
+      >,
+      executionGroupResults: ReadonlyArray<
+        ExecutionGroupResult<ExperimentalIncrementalExecutionResults>
+      >,
     ): void {
       const id = ids.get(deferredFragment);
       invariant(id !== undefined);
@@ -100,7 +124,7 @@ export function getDefaultPayloadPublisher(): PayloadPublisher<
     }
 
     function addFailedStream(
-      stream: Stream,
+      stream: Stream<ExperimentalIncrementalExecutionResults>,
       errors: ReadonlyArray<GraphQLError>,
     ): void {
       const id = ids.get(stream);
@@ -112,7 +136,9 @@ export function getDefaultPayloadPublisher(): PayloadPublisher<
       ids.delete(stream);
     }
 
-    function addSuccessfulStream(stream: Stream): void {
+    function addSuccessfulStream(
+      stream: Stream<ExperimentalIncrementalExecutionResults>,
+    ): void {
       const id = ids.get(stream);
       invariant(id !== undefined);
       completed.push({ id });
@@ -120,9 +146,11 @@ export function getDefaultPayloadPublisher(): PayloadPublisher<
     }
 
     function addStreamItems(
-      stream: Stream,
-      newRootNodes: ReadonlyArray<SubsequentResultRecord>,
-      streamItemsResult: StreamItemsResult,
+      stream: Stream<ExperimentalIncrementalExecutionResults>,
+      newRootNodes: ReadonlyArray<
+        SubsequentResultRecord<ExperimentalIncrementalExecutionResults>
+      >,
+      streamItemsResult: StreamItemsResult<ExperimentalIncrementalExecutionResults>,
     ): void {
       const id = ids.get(stream);
       invariant(id !== undefined);
@@ -133,6 +161,30 @@ export function getDefaultPayloadPublisher(): PayloadPublisher<
       incremental.push(incrementalEntry);
 
       addPendingResults(newRootNodes, pending);
+    }
+
+    function addExternalStream(
+      externalStream: ExternalStream<ExperimentalIncrementalExecutionResults>,
+    ): void {
+      const { stream, initialPath } = externalStream;
+      const { initialResult, subsequentResults } = stream;
+
+      const externalIdsForStream = new Map<string, string>();
+
+      externalIds.set(subsequentResults, externalIdsForStream);
+
+      for (const externalPendingResult of initialResult.pending) {
+        const { id: externalId, path } = externalPendingResult;
+        const id = String(nextId++);
+        externalIdsForStream.set(externalId, id);
+        pending.push({
+          ...externalPendingResult,
+          id,
+          path: [...initialPath, ...path],
+        });
+      }
+
+      registry.add(mapAsyncIterable(subsequentResults, (result) => result));
     }
 
     function getSubsequentPayload(
@@ -172,27 +224,29 @@ export function getDefaultPayloadPublisher(): PayloadPublisher<
   function getPayloads(
     data: ObjMap<unknown>,
     errors: ReadonlyArray<GraphQLError>,
-    newRootNodes: ReadonlyArray<SubsequentResultRecord>,
-    subsequentResults: AsyncGenerator<
-      SubsequentIncrementalExecutionResult,
-      void,
-      void
+    newRootNodes: ReadonlyArray<
+      SubsequentResultRecord<ExperimentalIncrementalExecutionResults>
     >,
+    subsequentResults: SimpleAsyncGenerator<SubsequentIncrementalExecutionResult>,
   ): ExperimentalIncrementalExecutionResults {
     const pending: Array<PendingResult> = [];
     addPendingResults(newRootNodes, pending);
+
+    registry.add(subsequentResults);
 
     return {
       initialResult:
         errors.length === 0
           ? { data, pending, hasNext: true }
           : { errors, data, pending, hasNext: true },
-      subsequentResults,
+      subsequentResults: registry.subscribe(),
     };
   }
 
   function addPendingResults(
-    newRootNodes: ReadonlyArray<SubsequentResultRecord>,
+    newRootNodes: ReadonlyArray<
+      SubsequentResultRecord<ExperimentalIncrementalExecutionResults>
+    >,
     pending: Array<PendingResult>,
   ): void {
     for (const node of newRootNodes) {
@@ -211,8 +265,8 @@ export function getDefaultPayloadPublisher(): PayloadPublisher<
 
   function getBestIdAndSubPath(
     initialId: string,
-    initialDeferredFragment: DeferredFragment,
-    executionGroupResult: ExecutionGroupResult,
+    initialDeferredFragment: DeferredFragment<ExperimentalIncrementalExecutionResults>,
+    executionGroupResult: ExecutionGroupResult<ExperimentalIncrementalExecutionResults>,
   ): { bestId: string; subPath: ReadonlyArray<string | number> | undefined } {
     let maxLength = pathToArray(initialDeferredFragment.path).length;
     let bestId = initialId;
