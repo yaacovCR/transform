@@ -1,5 +1,13 @@
 # @yaacovcr/transform
 
+## 0.0.6
+
+### Patch Changes
+
+- 61b888a: Remove path-scoped object extenders.
+
+  While workable for non-incremental requests, API for modifying existing deferred fragments would be quite complex.
+
 ## 0.0.5
 
 ### Patch Changes
