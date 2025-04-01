@@ -5,20 +5,16 @@ import type { ObjMap } from '../jsutils/ObjMap.js';
 import type { Path } from '../jsutils/Path.js';
 import { pathToArray } from '../jsutils/Path.js';
 
-import type { IncrementalDataRecord, IncrementalResults } from './types.js';
+import type { IncrementalDataRecord } from './types.js';
 
-export function filter<TData, TInitial, TSubsequent>(
+export function filter<TData>(
   data: TData,
   initialPath: Path | undefined,
   errors: ReadonlyMap<Path | undefined, GraphQLError>,
-  incrementalDataRecords: ReadonlyArray<
-    IncrementalDataRecord<IncrementalResults<TInitial, TSubsequent>>
-  >,
+  incrementalDataRecords: ReadonlyArray<IncrementalDataRecord>,
 ): {
   filteredData: TData;
-  filteredRecords: ReadonlyArray<
-    IncrementalDataRecord<IncrementalResults<TInitial, TSubsequent>>
-  >;
+  filteredRecords: ReadonlyArray<IncrementalDataRecord>;
 } {
   const nullableErrorPaths = new Set<Path | undefined>();
 
@@ -40,9 +36,7 @@ export function filter<TData, TInitial, TSubsequent>(
     }
   }
 
-  const filteredRecords: Array<
-    IncrementalDataRecord<IncrementalResults<TInitial, TSubsequent>>
-  > = [];
+  const filteredRecords: Array<IncrementalDataRecord> = [];
   for (const incrementalDataRecord of incrementalDataRecords) {
     let currentPath: Path | undefined = incrementalDataRecord.path;
 

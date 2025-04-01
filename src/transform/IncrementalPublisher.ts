@@ -22,13 +22,13 @@ import type {
   FailedDeferredFragment,
   IncrementalDataRecord,
   IncrementalGraphEvent,
-  IncrementalResults,
   Stream,
   StreamItems,
   SubsequentResultRecord,
 } from './types.js';
 import {
   isCompletedStreamItems,
+  isDeferredFragment,
   isExecutionGroupResult,
   isFailedDeferredFragment,
   isStream,
@@ -40,22 +40,19 @@ import {
  *
  * @internal
  */
-export class IncrementalPublisher<TInitial, TSubsequent> {
+export class IncrementalPublisher<TSubsequent, TIncremental> {
   private _isDone: boolean;
   private _mergedResult: MergedResult;
   private _subsequentResults:
     | SimpleAsyncGenerator<SubsequentIncrementalExecutionResult>
     | undefined;
-  private _incrementalGraph: IncrementalGraph<TInitial, TSubsequent>;
-  private _payloadPublisher: PayloadPublisher<TInitial, TSubsequent>;
-  private _subsequentPayloadPublisher: SubsequentPayloadPublisher<
-    TInitial,
-    TSubsequent
-  >;
+  private _incrementalGraph: IncrementalGraph;
+  private _payloadPublisher: PayloadPublisher<TSubsequent, TIncremental>;
+  private _subsequentPayloadPublisher: SubsequentPayloadPublisher<TSubsequent>;
 
   constructor(
     originalData: ObjMap<unknown>,
-    payloadPublisher: PayloadPublisher<TInitial, TSubsequent>,
+    payloadPublisher: PayloadPublisher<TSubsequent, TIncremental>,
     pending?: ReadonlyArray<PendingResult>,
     subsequentResults?: SimpleAsyncGenerator<SubsequentIncrementalExecutionResult>,
   ) {
@@ -75,13 +72,9 @@ export class IncrementalPublisher<TInitial, TSubsequent> {
   buildResponse(
     data: ObjMap<unknown>,
     errors: ReadonlyArray<GraphQLError>,
-    deferredFragments: ReadonlyArray<
-      DeferredFragment<IncrementalResults<TInitial, TSubsequent>>
-    >,
-    incrementalDataRecords: ReadonlyArray<
-      IncrementalDataRecord<IncrementalResults<TInitial, TSubsequent>>
-    >,
-  ): IncrementalResults<TInitial, TSubsequent> {
+    deferredFragments: ReadonlyArray<DeferredFragment>,
+    incrementalDataRecords: ReadonlyArray<IncrementalDataRecord>,
+  ): TIncremental {
     const newRootNodes = this._incrementalGraph.getNewRootNodes(
       deferredFragments,
       incrementalDataRecords,
@@ -98,9 +91,7 @@ export class IncrementalPublisher<TInitial, TSubsequent> {
   }
 
   private _handleNewRootNodes(
-    newRootNodes: ReadonlyArray<
-      SubsequentResultRecord<IncrementalResults<TInitial, TSubsequent>>
-    >,
+    newRootNodes: ReadonlyArray<SubsequentResultRecord>,
   ): void {
     for (const newRootNode of newRootNodes) {
       const pendingResultsByPath = this._mergedResult.getPendingResultsByPath(
@@ -109,9 +100,11 @@ export class IncrementalPublisher<TInitial, TSubsequent> {
 
       if (isStream(newRootNode)) {
         this._handleNewStream(newRootNode, pendingResultsByPath);
-      } else {
+      } else if (isDeferredFragment(newRootNode)) {
         this._handleNewDeferredFragment(newRootNode, pendingResultsByPath);
-      }
+      } /* c8 ignore start */ else {
+        invariant(false, 'Unexpected new root node type.');
+      } /* c8 ignore stop */
     }
   }
 
@@ -134,11 +127,8 @@ export class IncrementalPublisher<TInitial, TSubsequent> {
       return { value: undefined, done: true };
     }
 
-    let batch:
-      | Iterable<
-          IncrementalGraphEvent<IncrementalResults<TInitial, TSubsequent>>
-        >
-      | undefined = this._incrementalGraph.currentCompletedBatch();
+    let batch: Iterable<IncrementalGraphEvent> | undefined =
+      this._incrementalGraph.currentCompletedBatch();
     while (true) {
       for (const event of batch) {
         if (isExecutionGroupResult(event)) {
@@ -147,7 +137,9 @@ export class IncrementalPublisher<TInitial, TSubsequent> {
           this._handleCompletedStreamItems(event);
         } else if (isFailedDeferredFragment(event)) {
           this._handleFailedDeferredFragment(event);
-        }
+        } /* c8 ignore start */ else {
+          invariant(false, 'Unexpected event type in incremental graph.');
+        } /* c8 ignore stop */
       }
 
       const hasNext = this._incrementalGraph.hasNext();
@@ -162,6 +154,8 @@ export class IncrementalPublisher<TInitial, TSubsequent> {
         return { value: subsequentPayload, done: false };
       }
 
+      // TODO: add test case for async transformation
+      /* c8 ignore next 7 */
       if (this._incrementalGraph.hasPending()) {
         // eslint-disable-next-line no-await-in-loop
         batch = await this._incrementalGraph.nextCompletedBatch();
@@ -204,9 +198,7 @@ export class IncrementalPublisher<TInitial, TSubsequent> {
     return Promise.reject(error);
   }
 
-  private _handleCompletedStreamItems(
-    streamItems: StreamItems<IncrementalResults<TInitial, TSubsequent>>,
-  ): void {
+  private _handleCompletedStreamItems(streamItems: StreamItems): void {
     const { stream, errors, result } = streamItems;
     if (errors) {
       this._subsequentPayloadPublisher.addFailedStream(
@@ -238,9 +230,7 @@ export class IncrementalPublisher<TInitial, TSubsequent> {
   }
 
   private _handleCompletedExecutionGroup(
-    executionGroupResult: ExecutionGroupResult<
-      IncrementalResults<TInitial, TSubsequent>
-    >,
+    executionGroupResult: ExecutionGroupResult,
   ): void {
     if (executionGroupResult.data === null) {
       for (const deferredFragment of executionGroupResult.pendingExecutionGroup
@@ -284,9 +274,7 @@ export class IncrementalPublisher<TInitial, TSubsequent> {
   }
 
   private _handleFailedDeferredFragment(
-    failedDeferredFragment: FailedDeferredFragment<
-      IncrementalResults<TInitial, TSubsequent>
-    >,
+    failedDeferredFragment: FailedDeferredFragment,
   ): void {
     const { deferredFragment, errors } = failedDeferredFragment;
     // TODO: add test case for removing an already removed deferred fragment
@@ -303,7 +291,7 @@ export class IncrementalPublisher<TInitial, TSubsequent> {
   }
 
   private _handleNewStream(
-    newRootNode: Stream<IncrementalResults<TInitial, TSubsequent>>,
+    newRootNode: Stream,
     pendingResultsByPath:
       | ReadonlyMap<string, EncounteredPendingResult>
       | undefined,
@@ -329,7 +317,7 @@ export class IncrementalPublisher<TInitial, TSubsequent> {
   }
 
   private _handleNewDeferredFragment(
-    newRootNode: DeferredFragment<IncrementalResults<TInitial, TSubsequent>>,
+    newRootNode: DeferredFragment,
     pendingResultsByPath:
       | ReadonlyMap<string, EncounteredPendingResult>
       | undefined,

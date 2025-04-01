@@ -1,12 +1,9 @@
 import type {
-  ExecutionResult,
   GraphQLField,
   GraphQLLeafType,
-  GraphQLObjectType,
   ValidatedExecutionArgs,
 } from 'graphql';
 import type {
-  FieldDetails,
   GroupedFieldSet,
   // eslint-disable-next-line n/no-missing-import
 } from 'graphql/execution/collectFields.js';
@@ -14,11 +11,9 @@ import type {
 import { mapKey } from '../jsutils/mapKey.js';
 import type { ObjMap } from '../jsutils/ObjMap.js';
 import type { Path } from '../jsutils/Path.js';
-import type { PromiseOrValue } from '../jsutils/PromiseOrValue.js';
 
 import { addNewLabels } from './addNewLabels.js';
 import type { DeferUsageSet, ExecutionPlan } from './buildExecutionPlan.js';
-import type { IncrementalResults } from './types.js';
 
 export type ExecutionPlanBuilder = (
   originalGroupedFieldSet: GroupedFieldSet,
@@ -45,48 +40,28 @@ type LeafTransformers = ObjMap<LeafTransformer>;
 
 type PathScopedFieldTransformers = ObjMap<FieldTransformer>;
 
-type PathScopedObjectBatchExtenders<TInitial, TSubsequent> = ObjMap<
-  ObjMap<ObjectBatchExtender<TInitial, TSubsequent>>
->;
-
-export type ObjectBatchExtender<TInitial, TSubsequent> = (
-  objects: ReadonlyArray<ObjMap<unknown>>,
-  type: GraphQLObjectType,
-  fieldDetailsList: ReadonlyArray<FieldDetails>,
-) => PromiseOrValue<
-  ReadonlyArray<ExecutionResult | IncrementalResults<TInitial, TSubsequent>>
->;
-
-export interface Transformers<TInitial, TSubsequent> {
+export interface Transformers {
   pathScopedFieldTransformers?: PathScopedFieldTransformers;
   objectFieldTransformers?: ObjectFieldTransformers;
   leafTransformers?: LeafTransformers;
-  pathScopedObjectBatchExtenders?: PathScopedObjectBatchExtenders<
-    TInitial,
-    TSubsequent
-  >;
 }
 
-export interface TransformationContext<TInitial, TSubsequent> {
+export interface TransformationContext {
   argsWithNewLabels: ValidatedExecutionArgs;
   originalLabels: Map<string, string | undefined>;
   pathScopedFieldTransformers: PathScopedFieldTransformers;
   objectFieldTransformers: ObjectFieldTransformers;
   leafTransformers: LeafTransformers;
-  pathScopedObjectBatchExtenders: PathScopedObjectBatchExtenders<
-    TInitial,
-    TSubsequent
-  >;
   executionPlanBuilder: ExecutionPlanBuilder;
   prefix: string;
 }
 
-export function buildTransformationContext<TInitial, TSubsequent>(
+export function buildTransformationContext(
   originalArgs: ValidatedExecutionArgs,
-  transformers: Transformers<TInitial, TSubsequent>,
+  transformers: Transformers,
   executionPlanBuilder: ExecutionPlanBuilder,
   prefix: string,
-): TransformationContext<TInitial, TSubsequent> {
+): TransformationContext {
   const { argsWithNewLabels, originalLabels } = addNewLabels(
     prefix,
     originalArgs,
@@ -96,7 +71,6 @@ export function buildTransformationContext<TInitial, TSubsequent>(
     objectFieldTransformers = {},
     pathScopedFieldTransformers = {},
     leafTransformers = {},
-    pathScopedObjectBatchExtenders = {},
   } = transformers;
 
   return {
@@ -105,7 +79,6 @@ export function buildTransformationContext<TInitial, TSubsequent>(
     objectFieldTransformers,
     pathScopedFieldTransformers: prefixKeys(pathScopedFieldTransformers),
     leafTransformers,
-    pathScopedObjectBatchExtenders: prefixKeys(pathScopedObjectBatchExtenders),
     executionPlanBuilder,
     prefix,
   };

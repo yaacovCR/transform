@@ -3,9 +3,8 @@ import type { GraphQLError } from 'graphql';
 import type { BoxedPromiseOrValue } from '../jsutils/BoxedPromiseOrValue.js';
 import type { ObjMap } from '../jsutils/ObjMap.js';
 import type { Path } from '../jsutils/Path.js';
-import type { SimpleAsyncGenerator } from '../jsutils/SimpleAsyncGenerator.js';
 
-export interface Stream<TIncremental> {
+export interface Stream {
   path: Path;
   label: string | undefined;
   pathStr: string;
@@ -13,22 +12,20 @@ export interface Stream<TIncremental> {
   list: ReadonlyArray<unknown>;
   nextExecutionIndex: number;
   publishedItems: number;
-  result: (
-    index: number,
-  ) => BoxedPromiseOrValue<StreamItemResult<TIncremental>>;
-  streamItemQueue: Array<StreamItem<TIncremental>>;
+  result: (index: number) => BoxedPromiseOrValue<StreamItemResult>;
+  streamItemQueue: Array<StreamItem>;
   pending: boolean;
 }
 
-export type StreamItemResult<TIncremental> =
-  | SuccessfulStreamItemResult<TIncremental>
+export type StreamItemResult =
+  | SuccessfulStreamItemResult
   | FailedStreamItemResult;
 
-interface SuccessfulStreamItemResult<TIncremental> {
+interface SuccessfulStreamItemResult {
   item: unknown;
   errors: ReadonlyArray<GraphQLError>;
-  deferredFragments: ReadonlyArray<DeferredFragment<TIncremental>>;
-  incrementalDataRecords: ReadonlyArray<IncrementalDataRecord<TIncremental>>;
+  deferredFragments: ReadonlyArray<DeferredFragment>;
+  incrementalDataRecords: ReadonlyArray<IncrementalDataRecord>;
 }
 
 interface FailedStreamItemResult {
@@ -40,120 +37,100 @@ interface FailedStreamItemResult {
 
 type Thunk<T> = T | (() => T);
 
-export interface StreamItem<TIncremental> {
-  stream: Stream<TIncremental>;
+export interface StreamItem {
+  stream: Stream;
   result:
-    | Thunk<BoxedPromiseOrValue<StreamItemResult<TIncremental>>>
+    | Thunk<BoxedPromiseOrValue<StreamItemResult>>
     | ReadonlyArray<GraphQLError>
     | null;
 }
 
-export function isCompletedStreamItems<TIncremental>(
-  record: IncrementalGraphEvent<TIncremental>,
-): record is StreamItems<TIncremental> {
+export function isCompletedStreamItems(
+  record: IncrementalGraphEvent,
+): record is StreamItems {
   return 'stream' in record;
 }
 
-export interface StreamItems<TIncremental> {
-  stream: Stream<TIncremental>;
+export interface StreamItems {
+  stream: Stream;
   errors?: ReadonlyArray<GraphQLError>;
-  result?: StreamItemsResult<TIncremental>;
+  result?: StreamItemsResult;
 }
 
-export interface StreamItemsResult<TIncremental> {
+export interface StreamItemsResult {
   items: ReadonlyArray<unknown>;
   errors: ReadonlyArray<GraphQLError>;
-  deferredFragments: ReadonlyArray<DeferredFragment<TIncremental>>;
-  incrementalDataRecords: ReadonlyArray<IncrementalDataRecord<TIncremental>>;
+  deferredFragments: ReadonlyArray<DeferredFragment>;
+  incrementalDataRecords: ReadonlyArray<IncrementalDataRecord>;
 }
 
-export function isStream<TIncremental>(
-  record:
-    | IncrementalDataRecord<TIncremental>
-    | SubsequentResultRecord<TIncremental>,
-): record is Stream<TIncremental> {
+export function isStream(
+  record: IncrementalDataRecord | SubsequentResultRecord,
+): record is Stream {
   return 'list' in record;
 }
 
-export type SubsequentResultRecord<TIncremental> =
-  | DeferredFragment<TIncremental>
-  | Stream<TIncremental>;
+export type SubsequentResultRecord = DeferredFragment | Stream;
 
-export function isDeferredFragment<TIncremental>(
-  record:
-    | IncrementalDataRecord<TIncremental>
-    | SubsequentResultRecord<TIncremental>,
-): record is DeferredFragment<TIncremental> {
+export function isDeferredFragment(
+  record: IncrementalDataRecord | SubsequentResultRecord,
+): record is DeferredFragment {
   return 'pendingExecutionGroups' in record;
 }
 
-export interface DeferredFragment<TIncremental> {
+export interface DeferredFragment {
   path: Path | undefined;
   label: string | undefined;
   pathStr: string;
   key: string;
-  parent: DeferredFragment<TIncremental> | undefined;
+  parent: DeferredFragment | undefined;
   originalLabel: string | undefined;
-  pendingExecutionGroups: Set<PendingExecutionGroup<TIncremental>>;
-  successfulExecutionGroups: Set<ExecutionGroupResult<TIncremental>>;
-  children: Set<SubsequentResultRecord<TIncremental>>;
+  pendingExecutionGroups: Set<PendingExecutionGroup>;
+  successfulExecutionGroups: Set<ExecutionGroupResult>;
+  children: Set<SubsequentResultRecord>;
   ready: boolean | ReadonlyArray<GraphQLError>;
   failed: boolean | undefined;
 }
 
-export function isPendingExecutionGroup<TIncremental>(
-  record: IncrementalDataRecord<TIncremental>,
-): record is PendingExecutionGroup<TIncremental> {
+export function isPendingExecutionGroup(
+  record: IncrementalDataRecord,
+): record is PendingExecutionGroup {
   return 'deferredFragments' in record;
 }
 
-export interface PendingExecutionGroup<TIncremental> {
+export interface PendingExecutionGroup {
   path: Path | undefined;
-  deferredFragments: ReadonlyArray<DeferredFragment<TIncremental>>;
-  result: Thunk<BoxedPromiseOrValue<ExecutionGroupResult<TIncremental>>>;
+  deferredFragments: ReadonlyArray<DeferredFragment>;
+  result: Thunk<BoxedPromiseOrValue<ExecutionGroupResult>>;
 }
 
-export function isExecutionGroupResult<TIncremental>(
-  record: IncrementalGraphEvent<TIncremental>,
-): record is ExecutionGroupResult<TIncremental> {
+export function isExecutionGroupResult(
+  record: IncrementalGraphEvent,
+): record is ExecutionGroupResult {
   return 'deferredFragments' in record;
 }
-export interface ExecutionGroupResult<TIncremental> {
-  pendingExecutionGroup: PendingExecutionGroup<TIncremental>;
+export interface ExecutionGroupResult {
+  pendingExecutionGroup: PendingExecutionGroup;
   data: ObjMap<unknown>;
   errors: ReadonlyArray<GraphQLError>;
-  deferredFragments: ReadonlyArray<DeferredFragment<TIncremental>>;
-  incrementalDataRecords: ReadonlyArray<IncrementalDataRecord<TIncremental>>;
+  deferredFragments: ReadonlyArray<DeferredFragment>;
+  incrementalDataRecords: ReadonlyArray<IncrementalDataRecord>;
 }
 
-export function isFailedDeferredFragment<TIncremental>(
-  record: IncrementalGraphEvent<TIncremental>,
-): record is FailedDeferredFragment<TIncremental> {
+export function isFailedDeferredFragment(
+  record: IncrementalGraphEvent,
+): record is FailedDeferredFragment {
   return 'deferredFragment' in record;
 }
 
-export interface FailedDeferredFragment<TIncremental> {
-  deferredFragment: DeferredFragment<TIncremental>;
+export interface FailedDeferredFragment {
+  deferredFragment: DeferredFragment;
   errors: ReadonlyArray<GraphQLError>;
 }
 
-export type IncrementalDataRecord<TIncremental> =
-  | PendingExecutionGroup<TIncremental>
-  | Stream<TIncremental>
-  | ExternalStream<TIncremental>;
+export type IncrementalDataRecord = PendingExecutionGroup | Stream;
 
-export type IncrementalGraphEvent<TIncremental> =
-  | ExecutionGroupResult<TIncremental>
-  | FailedDeferredFragment<TIncremental>
-  | StreamItems<TIncremental>;
-
-export interface ExternalStream<TIncremental> {
-  stream: TIncremental;
-  path: Path;
-  initialPath: ReadonlyArray<string | number>;
-}
-
-export interface IncrementalResults<TInitial, TSubsequent> {
-  initialResult: TInitial;
-  subsequentResults: SimpleAsyncGenerator<TSubsequent>;
-}
+export type IncrementalGraphEvent =
+  | ExecutionGroupResult
+  | FailedDeferredFragment
+  | StreamItems;
