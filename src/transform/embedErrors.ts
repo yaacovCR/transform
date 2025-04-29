@@ -7,7 +7,7 @@ import type { ObjMap } from '../jsutils/ObjMap.js';
 import { EmbeddedErrors } from './EmbeddedError.js';
 
 export function embedErrors(
-  data: ObjMap<unknown> | null,
+  data: ObjMap<unknown>,
   errors: ReadonlyArray<GraphQLError> | undefined,
 ): void {
   if (errors == null || errors.length === 0) {

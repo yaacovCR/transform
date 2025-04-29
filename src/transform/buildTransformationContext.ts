@@ -1,6 +1,9 @@
 import type {
+  ExecutionResult,
+  ExperimentalIncrementalExecutionResults,
   GraphQLField,
   GraphQLLeafType,
+  GraphQLSchema,
   ValidatedExecutionArgs,
 } from 'graphql';
 import type {
@@ -8,9 +11,10 @@ import type {
   // eslint-disable-next-line n/no-missing-import
 } from 'graphql/execution/collectFields.js';
 
-import { mapKey } from '../jsutils/mapKey.js';
+import { keyMap } from '../jsutils/keyMap.js';
 import type { ObjMap } from '../jsutils/ObjMap.js';
 import type { Path } from '../jsutils/Path.js';
+import type { PromiseOrValue } from '../jsutils/PromiseOrValue.js';
 
 import { addNewLabels } from './addNewLabels.js';
 import type { DeferUsageSet, ExecutionPlan } from './buildExecutionPlan.js';
@@ -35,7 +39,6 @@ export type LeafTransformer = (
   type: GraphQLLeafType,
   path: Path,
 ) => unknown;
-
 type LeafTransformers = ObjMap<LeafTransformer>;
 
 type PathScopedFieldTransformers = ObjMap<FieldTransformer>;
@@ -46,18 +49,35 @@ export interface Transformers {
   leafTransformers?: LeafTransformers;
 }
 
+export interface PathSegmentNode {
+  fieldTransformer?: FieldTransformer;
+  children: ObjMap<PathSegmentNode>;
+}
+
 export interface TransformationContext {
+  subschemas: ObjMap<SubschemaConfig>;
   argsWithNewLabels: ValidatedExecutionArgs;
   originalLabels: Map<string, string | undefined>;
-  pathScopedFieldTransformers: PathScopedFieldTransformers;
+  pathSegmentRootNode: PathSegmentNode;
   objectFieldTransformers: ObjectFieldTransformers;
   leafTransformers: LeafTransformers;
   executionPlanBuilder: ExecutionPlanBuilder;
   prefix: string;
 }
 
+export interface SubschemaConfig {
+  label: string;
+  schema: GraphQLSchema;
+  executor?: Executor;
+}
+
+export type Executor = (
+  args: ValidatedExecutionArgs,
+) => PromiseOrValue<ExecutionResult | ExperimentalIncrementalExecutionResults>;
+
 export function buildTransformationContext(
   originalArgs: ValidatedExecutionArgs,
+  subschemas: ReadonlyArray<SubschemaConfig>,
   transformers: Transformers,
   executionPlanBuilder: ExecutionPlanBuilder,
   prefix: string,
@@ -74,20 +94,33 @@ export function buildTransformationContext(
   } = transformers;
 
   return {
+    subschemas: keyMap(subschemas, (subschema) => subschema.label),
     argsWithNewLabels,
     originalLabels,
     objectFieldTransformers,
-    pathScopedFieldTransformers: prefixKeys(pathScopedFieldTransformers),
+    pathSegmentRootNode: buildPathSegmentTree(pathScopedFieldTransformers),
     leafTransformers,
     executionPlanBuilder,
     prefix,
   };
 }
 
-function prefixKeys<T>(obj: ObjMap<T>): ObjMap<T> {
-  return mapKey(
-    obj,
-    //by modifying the keys, identical pathStr logic can be utilized for root fields and subfields
-    (key) => `.${key}`,
-  );
+function buildPathSegmentTree(
+  inputTransformers: ObjMap<FieldTransformer>,
+): PathSegmentNode {
+  const root: PathSegmentNode = {
+    children: {},
+  };
+  for (const pathString of Object.keys(inputTransformers)) {
+    const segments = pathString.split('.');
+    let currentNode = root;
+    for (const segment of segments) {
+      const child = (currentNode.children[segment] ??= {
+        children: {},
+      });
+      currentNode = child;
+    }
+    currentNode.fieldTransformer = inputTransformers[pathString];
+  }
+  return root;
 }

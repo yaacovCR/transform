@@ -21,7 +21,7 @@ import { promiseWithResolvers } from '../../jsutils/promiseWithResolvers.js';
 import type {
   LegacyInitialIncrementalExecutionResult,
   LegacySubsequentIncrementalExecutionResult,
-} from '../legacyExecuteIncrementally.js';
+} from '../getLegacyPayloadPublisher.js';
 import { legacyExecuteIncrementally as execute } from '../legacyExecuteIncrementally.js';
 
 const friendType = new GraphQLObjectType({
@@ -362,17 +362,11 @@ describe('Execute: legacy stream directive', () => {
       {
         incremental: [
           {
-            items: [{ name: 'Han', id: '2' }],
+            items: [
+              { name: 'Han', id: '2' },
+              { name: 'Leia', id: '3' },
+            ],
             path: ['friendList', 1],
-          },
-        ],
-        hasNext: true,
-      },
-      {
-        incremental: [
-          {
-            items: [{ name: 'Leia', id: '3' }],
-            path: ['friendList', 2],
           },
         ],
         hasNext: false,
@@ -676,9 +670,6 @@ describe('Execute: legacy stream directive', () => {
             path: ['friendList', 2],
           },
         ],
-        hasNext: true,
-      },
-      {
         hasNext: false,
       },
     ]);
@@ -1333,9 +1324,6 @@ describe('Execute: legacy stream directive', () => {
             path: ['friendList', 2],
           },
         ],
-        hasNext: true,
-      },
-      {
         hasNext: false,
       },
     ]);
@@ -2026,9 +2014,6 @@ describe('Execute: legacy stream directive', () => {
             path: ['nestedObject', 'nestedFriendList', 1],
           },
         ],
-        hasNext: true,
-      },
-      {
         hasNext: false,
       },
     ]);
@@ -2102,9 +2087,6 @@ describe('Execute: legacy stream directive', () => {
             path: ['nestedObject', 'nestedFriendList', 2],
           },
         ],
-        hasNext: true,
-      },
-      {
         hasNext: false,
       },
     ]);
@@ -2188,20 +2170,13 @@ describe('Execute: legacy stream directive', () => {
             path: ['nestedObject', 'nestedFriendList', 1],
           },
         ],
-        hasNext: true,
+        hasNext: false,
       },
       done: false,
     });
 
     const result5 = await iterator.next();
     expectJSON(result5).toDeepEqual({
-      value: {
-        hasNext: false,
-      },
-      done: false,
-    });
-    const result6 = await iterator.next();
-    expectJSON(result6).toDeepEqual({
       value: undefined,
       done: true,
     });

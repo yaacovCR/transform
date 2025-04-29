@@ -368,16 +368,10 @@ describe('Execute: stream directive', () => {
       {
         incremental: [
           {
-            items: [{ name: 'Han', id: '2' }],
-            id: '0',
-          },
-        ],
-        hasNext: true,
-      },
-      {
-        incremental: [
-          {
-            items: [{ name: 'Leia', id: '3' }],
+            items: [
+              { name: 'Han', id: '2' },
+              { name: 'Leia', id: '3' },
+            ],
             id: '0',
           },
         ],
@@ -694,9 +688,6 @@ describe('Execute: stream directive', () => {
             id: '0',
           },
         ],
-        hasNext: true,
-      },
-      {
         completed: [{ id: '0' }],
         hasNext: false,
       },
@@ -1367,9 +1358,6 @@ describe('Execute: stream directive', () => {
             id: '0',
           },
         ],
-        hasNext: true,
-      },
-      {
         completed: [{ id: '0' }],
         hasNext: false,
       },
@@ -1997,9 +1985,6 @@ describe('Execute: stream directive', () => {
             id: '0',
           },
         ],
-        hasNext: true,
-      },
-      {
         completed: [{ id: '0' }],
         hasNext: false,
       },
@@ -2087,21 +2072,14 @@ describe('Execute: stream directive', () => {
             id: '1',
           },
         ],
-        hasNext: true,
+        completed: [{ id: '1' }],
+        hasNext: false,
       },
       done: false,
     });
 
     const result5 = await iterator.next();
     expectJSON(result5).toDeepEqual({
-      value: {
-        completed: [{ id: '1' }],
-        hasNext: false,
-      },
-      done: false,
-    });
-    const result6 = await iterator.next();
-    expectJSON(result6).toDeepEqual({
       value: undefined,
       done: true,
     });
@@ -2193,27 +2171,19 @@ describe('Execute: stream directive', () => {
     const result4 = await iterator.next();
     expectJSON(result4).toDeepEqual({
       value: {
-        completed: [{ id: '0' }],
-        hasNext: true,
-      },
-      done: false,
-    });
-    const result5 = await iterator.next();
-    expectJSON(result5).toDeepEqual({
-      value: {
         incremental: [
           {
             data: { name: 'Han' },
             id: '2',
           },
         ],
-        completed: [{ id: '2' }],
+        completed: [{ id: '0' }, { id: '2' }],
         hasNext: false,
       },
       done: false,
     });
-    const result6 = await iterator.next();
-    expectJSON(result6).toDeepEqual({
+    const result5 = await iterator.next();
+    expectJSON(result5).toDeepEqual({
       value: undefined,
       done: true,
     });

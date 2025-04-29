@@ -42,7 +42,7 @@ export interface StreamItem {
   result:
     | Thunk<BoxedPromiseOrValue<StreamItemResult>>
     | ReadonlyArray<GraphQLError>
-    | null;
+    | undefined;
 }
 
 export function isCompletedStreamItems(

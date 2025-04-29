@@ -483,15 +483,14 @@ describe('Execute: Handles execution of abstract types', () => {
       ],
     };
 
+    // query invalid, unions do not have fields, so name skipped
     expect(await executeQuery({ schema, query, rootValue })).to.deep.equal({
       data: {
         pets: [
           {
-            name: 'Odie',
             woofs: true,
           },
           {
-            name: 'Garfield',
             meows: false,
           },
         ],

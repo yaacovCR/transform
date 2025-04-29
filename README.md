@@ -22,31 +22,60 @@ pnpm add @yaacovCR/transform graphql@17.0.0-alpha.8
 
 ## Overview
 
-This library offers:
+This library, primarily through its `transform()` export, provides several helpful functionalities for working with GraphQL results:
 
-- Configurable synchronous leaf value transformers, object field transformers, and path-scoped field transformers for modifying GraphQL results.
-- Mapping from the latest incremental delivery format to the legacy format.
+- **Result Composition:** Combine GraphQL results, including incremental delivery payloads (`@defer`/`@stream`), from multiple downstream GraphQL services into a single unified result. (Note: Composition is currently under development and primarily functional for root fields.)
+- **Result Transformation:** Modify results using configurable transformers based on the leaf type, object field, or specific location within a GraphQL operation.
+- **Legacy Incremental Format Mapping:** Convert results from the modern incremental delivery specification to the legacy format used in earlier `graphql-js` versions.
 
-Note: In the case of multiple transformers, execution is in the above order: first any leaf value transformer is executed, followed by any object field transformer, and then the path-scoped field transformer.
+Notes:
+
+- When multiple transformer types are applied to the same field, they execute in the following order: leaf value transformer -> object field transformer -> path-scoped field transformer.
+
+- A separate `legacyExecuteIncrementally()` export is also available. It leverages the same underlying transformation logic but is specifically designed to provide backwards compatibility for the legacy incremental delivery format when interacting with a single GraphQL service (i.e., without composition).
 
 ## Usage
 
-### Configurable Leaf Transformers
+### Composition of GraphQL Results
 
-Pass `leafTransformers` in a `Transformers` object to `transformResult()`.
+To compose results from multiple GraphQL services, provide a `subschemas` array to `transform()`:
 
 ```ts
-import { transformResult } from '@yaacovCR/transform';
+import { transform } from '@yaacovCR/transform';
 
-const originalResult = await experimentalExecuteIncrementally({
+const transformed = await transform({
   schema,
   document,
-  rootValue,
-  contextValue,
   variableValues,
+  subschemas: [
+    {
+      label: 'Subschema1',
+      subschema: new GraphQLSchema({ ... }),
+      executor: myExecutor1,
+    },
+    {
+      label: 'Subschema2',
+      subschema: new GraphQLSchema({ ... }),
+      executor: myExecutor1,
+    },
+  ],
 });
+```
 
-const transformed = await transformResult(originalResult, {
+### Transformation of GraphQL Results
+
+## Configurable Leaf Transformers
+
+To apply transformations to specific leaf types (scalars or enums), pass `leafTransformers` to `transform()`:
+
+```ts
+import { transform } from '@yaacovCR/transform';
+
+const transformed = await transform({
+  schema,
+  document,
+  variableValues,
+  subschemas,
   leafTransformers: {
     Color: (value) => (value === 'GREEN' ? 'DARK_GREEN' : value),
   },
@@ -65,22 +94,18 @@ type LeafTransformer = (
 ) => unknown;
 ```
 
-### Configurable Object Field Transformers
+## Configurable Object Field Transformers
 
-Pass `objectFieldTransformers` in a `Transformers` object to `transformResult()`, namespaced by type and field.
+To apply transformations to specific fields within object types, pass `objectFieldTransformers` to `transform()`, namespaced by type name and field name:
 
 ```ts
-import { transformResult } from '@yaacovCR/transform';
+import { transform } from '@yaacovCR/transform';
 
-const originalResult = await experimentalExecuteIncrementally({
+const transformed = await transform({
   schema,
   document,
-  rootValue,
-  contextValue,
   variableValues,
-});
-
-const transformed = await transformResult(originalResult, {
+  subschemas,
   objectFieldTransformers: {
     SomeType: {
       someField: (value) => 'transformed',
@@ -101,22 +126,18 @@ type FieldTransformer = (
 ) => unknown;
 ```
 
-### Configurable Path Scoped Field Transformers
+## Configurable Path-Scoped Field Transformers
 
-Pass `pathScopedFieldTransformers` in a `Transformers` object to `transformResult()`, keyed by a period-delimited path to the given field within the operation. (Numeric indices for list fields are simply skipped, reflecting the path within the given operation rather than the result.)
+To apply transformations based on a field's specific location within the operation, pass `pathScopedFieldTransformers` to `transform()`. The keys are period-delimited paths reflecting the field structure in the operation (numeric list indices are omitted).
 
 ```ts
-import { transformResult } from '@yaacovCR/transform';
+import { transform } from '@yaacovCR/transform';
 
-const originalResult = await experimentalExecuteIncrementally({
+const transformed = await transform({
   schema,
   document,
-  rootValue,
-  contextValue,
   variableValues,
-});
-
-const transformed = await transformResult(originalResult, {
+  subschemas,
   objectFieldTransformers: {
     'someType.someFieldNameOrAlias': (value) => 'transformed',
   },
@@ -125,7 +146,21 @@ const transformed = await transformResult(originalResult, {
 
 ### Legacy Incremental Delivery Format
 
-Convert from the the latest incremental delivery format to the legacy format:
+If you need to interact with systems expecting the older incremental delivery format (from `graphql-js` pre-v17), you can enable conversion:
+
+```ts
+import { transform } from '@yaacovCR/transform';
+
+const result = await transform({
+  schema,
+  document,
+  variableValues,
+  subschemas,
+  legacyIncremental: true,
+});
+```
+
+Alternatively, if you are working with a single GraphQL service (no composition) and need the legacy format, the `legacyExecuteIncrementally()` function provides a dedicated interface:
 
 ```ts
 import { legacyExecuteIncrementally } from '@yaacovCR/transform';
@@ -133,9 +168,17 @@ import { legacyExecuteIncrementally } from '@yaacovCR/transform';
 const result = await legacyExecuteIncrementally({
   schema,
   document,
+  variableValues,
+  operationName,
   rootValue,
   contextValue,
-  variableValues,
+  fieldResolver,
+  typeResolver,
+  subscribeFieldResolver,
+  perEventExecutor,
+  enableEarlyExecution,
+  hideSuggestions,
+  abortSignal,
 });
 ```
 

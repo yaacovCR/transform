@@ -1,210 +1,333 @@
 import type { GraphQLError } from 'graphql';
 import type {
   CompletedResult,
+  ExecutionResult,
+  ExperimentalIncrementalExecutionResults,
   IncrementalResult,
   PendingResult,
   SubsequentIncrementalExecutionResult,
   // eslint-disable-next-line n/no-missing-import
 } from 'graphql/execution/types.js';
 
+import { AsyncGeneratorCombinator } from '../jsutils/AsyncGeneratorCombinator.js';
 import { invariant } from '../jsutils/invariant.js';
+import { isObjectLike } from '../jsutils/isObjectLike.js';
 import type { ObjMap } from '../jsutils/ObjMap.js';
+import type { SimpleAsyncGenerator } from '../jsutils/SimpleAsyncGenerator.js';
 
+import { EmbeddedErrors } from './EmbeddedError.js';
 import { embedErrors } from './embedErrors.js';
 import { getObjectAtPath } from './getObjectAtPath.js';
+import { mapAsyncIterable } from './mapAsyncIterable.js';
 
-export interface EncounteredPendingResult {
-  id: string;
-  path: ReadonlyArray<string | number>;
-  label: string;
-  pathStr: string;
-  key: string;
-  type: 'stream' | 'deferred' | undefined;
-  completed: undefined | ReadonlyArray<GraphQLError>;
+interface KeyedStream {
+  key: string; // path
+  list: Array<unknown>;
+}
+
+interface KeyedDefer {
+  key: string; // label + path
+  object: ObjMap<unknown>;
+}
+
+function isKeyedStream(
+  keyedPendingResult: KeyedPendingResult,
+): keyedPendingResult is KeyedStream {
+  return 'list' in keyedPendingResult;
+}
+
+export type KeyedPendingResult = KeyedStream | KeyedDefer;
+
+export interface PositionInfo {
+  pending: KeyedPendingResult;
+  errors: ReadonlyArray<GraphQLError> | undefined;
+}
+
+export interface SubsequentResultEvents {
+  streamsWithNewItems: Set<string>;
+  completedStreams: Map<string, ReadonlyArray<GraphQLError> | undefined>;
+  completedDeferredFragments: Map<
+    string,
+    ReadonlyArray<GraphQLError> | undefined
+  >;
 }
 
 /**
  * @internal
  */
 export class MergedResult {
-  private _mergedResult: ObjMap<unknown>;
-  private _pendingResultsById: Map<string, EncounteredPendingResult>;
-  private _pendingResultsByPath: Map<
-    string,
-    Map<string, EncounteredPendingResult>
-  >;
+  private _events: AsyncGeneratorCombinator<SubsequentResultEvents>;
 
-  constructor(originalData: ObjMap<unknown>) {
-    this._mergedResult = originalData;
-    this._pendingResultsById = new Map();
-    this._pendingResultsByPath = new Map();
+  private _mergedResult: ObjMap<unknown> | EmbeddedErrors;
+  private _keyedPendingResults: Map<string, KeyedPendingResult>;
+  private _positionInfo: Map<string, PositionInfo>;
+
+  constructor() {
+    this._mergedResult = Object.create(null);
+    this._keyedPendingResults = new Map();
+    this._positionInfo = new Map();
+    this._events = new AsyncGeneratorCombinator<SubsequentResultEvents>();
+    this._keyedPendingResults = new Map();
+    this._positionInfo = new Map();
   }
 
-  getPendingResultsByPath(
-    pathStr: string,
-  ): ReadonlyMap<string, EncounteredPendingResult> | undefined {
-    return this._pendingResultsByPath.get(pathStr);
-  }
-
-  processPending(
-    pendingResults: ReadonlyArray<PendingResult>,
-    skipTyping?: boolean,
-  ): ReadonlyArray<EncounteredPendingResult> | undefined {
-    const newPendingResults: Array<EncounteredPendingResult> = [];
-    for (const pendingResult of pendingResults) {
-      const { id, path, label } = pendingResult;
-      invariant(label != null);
-      const pathStr = path.join('.');
-      const key = label + '.' + pathStr;
-      const newPendingResult: EncounteredPendingResult = {
-        id,
-        path,
-        label,
-        pathStr,
-        key,
-        type: undefined,
-        completed: undefined,
-      };
-      newPendingResults.push(newPendingResult);
-      this._pendingResultsById.set(id, newPendingResult);
-      let pendingResultsByPath = this._pendingResultsByPath.get(pathStr);
-      if (pendingResultsByPath === undefined) {
-        pendingResultsByPath = new Map();
-        this._pendingResultsByPath.set(pathStr, pendingResultsByPath);
-      }
-      pendingResultsByPath.set(label, newPendingResult);
-    }
-    if (skipTyping) {
-      return newPendingResults;
-    }
-    this._typeNewPending(newPendingResults);
-  }
-
-  onSubsequentIncrementalExecutionResult(
-    subsequentIncrementalExecutionResult: SubsequentIncrementalExecutionResult,
-    onStreamItems: (pendingResult: EncounteredPendingResult) => void,
-    onCompletedStream: (pendingResult: EncounteredPendingResult) => void,
-    onCompletedDeferredFragment: (
-      pendingResult: EncounteredPendingResult,
-    ) => void,
+  add(
+    subschemaLabel: string,
+    result: ExecutionResult | ExperimentalIncrementalExecutionResults,
   ): void {
+    let data;
+    let errors;
+    let pending;
+    let subsequentResults;
+
+    if ('initialResult' in result) {
+      const initialResult = result.initialResult;
+      ({ data, errors, pending } = initialResult);
+      subsequentResults = result.subsequentResults;
+    } else {
+      ({ data, errors } = result);
+    }
+
+    // TODO: add test case
+    /* c8 ignore next 6 */
+    if (this._mergedResult instanceof EmbeddedErrors) {
+      if (errors) {
+        this._mergedResult.errors.push(...errors);
+      }
+      return;
+    }
+
+    if (data == null) {
+      invariant(errors !== undefined);
+      this._mergedResult = new EmbeddedErrors(errors);
+      return;
+    }
+
+    embedErrors(data, errors);
+    Object.assign(this._mergedResult, data);
+
+    if (subsequentResults) {
+      this._events.add(
+        mapAsyncIterable(subsequentResults, (subsequentResult) =>
+          this._processSubsequentResult(subschemaLabel, subsequentResult),
+        ),
+      );
+    }
+    if (pending) {
+      const pendingById = this._getPendingById(subschemaLabel, pending);
+      this._keyPendingResults(pendingById);
+    }
+  }
+
+  getMergedData(): ObjMap<unknown> | EmbeddedErrors {
+    return this._mergedResult;
+  }
+
+  getEvents(): SimpleAsyncGenerator<SubsequentResultEvents> {
+    return this._events;
+  }
+
+  getPositionInfo(key: string): PositionInfo | undefined {
+    return this._positionInfo.get(key);
+  }
+
+  private _processSubsequentResult(
+    subschemaLabel: string,
+    subsequentIncrementalExecutionResult: SubsequentIncrementalExecutionResult,
+  ): SubsequentResultEvents {
     const { pending, incremental, completed } =
       subsequentIncrementalExecutionResult;
 
-    let newPendingResults: ReadonlyArray<EncounteredPendingResult> | undefined;
+    const events: SubsequentResultEvents = {
+      streamsWithNewItems: new Set(),
+      completedStreams: new Map(),
+      completedDeferredFragments: new Map(),
+    };
+
+    let pendingById: Map<string, PendingResult> | undefined;
     if (pending) {
-      newPendingResults = this.processPending(pending, true);
+      pendingById = this._getPendingById(subschemaLabel, pending);
     }
 
     if (incremental) {
-      this._onIncremental(incremental, onStreamItems);
+      const streamsWithNewItems = this._processIncremental(
+        subschemaLabel,
+        incremental,
+        pendingById,
+      );
+      streamsWithNewItems.forEach((key) => events.streamsWithNewItems.add(key));
     }
 
-    if (newPendingResults) {
-      this._typeNewPending(newPendingResults);
+    // Key any *new* pending results that arrived in this payload
+    if (pendingById) {
+      this._keyPendingResults(pendingById);
     }
 
     if (completed) {
-      this._onCompleted(
-        completed,
-        onCompletedStream,
-        onCompletedDeferredFragment,
+      const { completedStreams, completedDeferredFragments } =
+        this._processCompleted(subschemaLabel, completed);
+      completedStreams.forEach((errors, key) =>
+        events.completedStreams.set(key, errors),
+      );
+      completedDeferredFragments.forEach((errors, key) =>
+        events.completedDeferredFragments.set(key, errors),
       );
     }
+
+    return events;
   }
 
-  private _typeNewPending(
-    newPendingResults: ReadonlyArray<EncounteredPendingResult>,
-  ): void {
-    for (const pendingResult of newPendingResults) {
-      const incompleteAtPath = getObjectAtPath(
-        this._mergedResult,
-        pendingResult.path,
-      );
-      pendingResult.type = Array.isArray(incompleteAtPath)
-        ? 'stream'
-        : 'deferred';
+  private _getPendingById(
+    subschemaLabel: string,
+    pendingResults: ReadonlyArray<PendingResult>,
+  ): Map<string, PendingResult> {
+    const pendingById = new Map<string, PendingResult>();
+    for (const pendingResult of pendingResults) {
+      const prefixedId = `${subschemaLabel}:${pendingResult.id}`;
+      pendingById.set(prefixedId, pendingResult);
     }
+    return pendingById;
   }
 
-  private _onCompleted(
+  private _keyPendingResults(pendingById: Map<string, PendingResult>): void {
+    pendingById.forEach((pendingResult, id) =>
+      this._keyPendingResult(id, pendingResult),
+    );
+  }
+
+  private _keyPendingResult(
+    id: string,
+    pendingResult: PendingResult,
+  ): KeyedPendingResult {
+    invariant(!(this._mergedResult instanceof EmbeddedErrors));
+    const path = pendingResult.path;
+    const incompleteAtPath = getObjectAtPath(this._mergedResult, path);
+    let key: string;
+    let keyedPendingResult: KeyedPendingResult;
+    if (Array.isArray(incompleteAtPath)) {
+      key = path.join('.');
+      keyedPendingResult = {
+        key,
+        list: incompleteAtPath,
+      };
+    } else {
+      key = pendingResult.label + '.' + path.join('.');
+      keyedPendingResult = {
+        key,
+        object: incompleteAtPath,
+      };
+    }
+    this._keyedPendingResults.set(id, keyedPendingResult);
+    this._positionInfo.set(key, {
+      pending: keyedPendingResult,
+      errors: undefined,
+    });
+    return keyedPendingResult;
+  }
+
+  private _processCompleted(
+    subschemaLabel: string,
     completedResults: ReadonlyArray<CompletedResult>,
-    onCompletedStream: (pendingResult: EncounteredPendingResult) => void,
-    onCompletedDeferredFragment: (
-      pendingResult: EncounteredPendingResult,
-    ) => void,
-  ): void {
+  ): {
+    completedStreams: Map<string, ReadonlyArray<GraphQLError> | undefined>;
+    completedDeferredFragments: Map<
+      string,
+      ReadonlyArray<GraphQLError> | undefined
+    >;
+  } {
+    const completedStreams = new Map<
+      string,
+      ReadonlyArray<GraphQLError> | undefined
+    >();
+    const completedDeferredFragments = new Map<
+      string,
+      ReadonlyArray<GraphQLError> | undefined
+    >();
+
     for (const completedResult of completedResults) {
-      const pendingResult = this._pendingResultsById.get(completedResult.id);
-      invariant(pendingResult != null);
+      const id = `${subschemaLabel}:${completedResult.id}`;
+      const keyedPendingResult = this._keyedPendingResults.get(id);
+      invariant(keyedPendingResult !== undefined);
+      this._keyedPendingResults.delete(id);
 
-      if ('errors' in completedResult) {
-        pendingResult.completed = completedResult.errors;
+      const key = keyedPendingResult.key;
+      const errors = completedResult.errors;
+      if (errors) {
+        // we cannot clean up this._positionInfo in the error
+        // case because we might complete early, and we may need to retain
+        // errors for publisher to send
+        const positionInfo = this._positionInfo.get(key);
+        invariant(positionInfo !== undefined);
+        positionInfo.errors = errors;
+      } else {
+        // clean up positionInfo by mimicking inlining
+        this._positionInfo.delete(key);
       }
 
-      this._pendingResultsById.delete(pendingResult.id);
-
-      if (pendingResult.type === 'stream') {
-        onCompletedStream(pendingResult);
-
-        // we can clean up in the non-error case as if result was inlined
-        // but otherwise we might complete early, and we may need to
-        // retain errors for publisher to send
-        if (pendingResult.completed === undefined) {
-          this._pendingResultsByPath.delete(pendingResult.pathStr);
-        }
-        continue;
-      }
-
-      onCompletedDeferredFragment(pendingResult);
-
-      // we can clean up in the non-error case as if result was inlined
-      // but otherwise we might complete early, and we may need to
-      // retain errors for publisher to send
-      if (pendingResult.completed === undefined) {
-        const pendingResultsByPath = this._pendingResultsByPath.get(
-          pendingResult.pathStr,
-        );
-        invariant(pendingResultsByPath != null);
-        pendingResultsByPath.delete(pendingResult.label);
-        if (pendingResultsByPath.size === 0) {
-          this._pendingResultsByPath.delete(pendingResult.pathStr);
-        }
+      if (isKeyedStream(keyedPendingResult)) {
+        completedStreams.set(key, errors);
+      } else {
+        completedDeferredFragments.set(key, errors);
       }
     }
+    return { completedStreams, completedDeferredFragments };
   }
 
-  private _onIncremental(
+  private _processIncremental(
+    subschemaLabel: string,
     incrementalResults: ReadonlyArray<IncrementalResult>,
-    onStream: (pendingResult: EncounteredPendingResult) => void,
-  ): void {
-    const streams = new Set<EncounteredPendingResult>();
+    pendingById: Map<string, PendingResult> | undefined,
+  ): Set<string> {
+    const streams = new Set<string>();
     for (const incrementalResult of incrementalResults) {
-      const id = incrementalResult.id;
-      const pendingResult = this._pendingResultsById.get(id);
-      invariant(pendingResult != null);
-      const path = incrementalResult.subPath
-        ? [...pendingResult.path, ...incrementalResult.subPath]
-        : pendingResult.path;
+      const id = `${subschemaLabel}:${incrementalResult.id}`;
+      const keyedPendingResult = this._getKeyedPendingResult(id, pendingById);
 
-      const incompleteAtPath = getObjectAtPath(this._mergedResult, path);
-      if (Array.isArray(incompleteAtPath)) {
+      if (isKeyedStream(keyedPendingResult)) {
         invariant('items' in incrementalResult);
-        incompleteAtPath.push(
+        keyedPendingResult.list.push(
           ...(incrementalResult.items as ReadonlyArray<unknown>),
         );
-        embedErrors(this._mergedResult, incrementalResult.errors);
-        streams.add(pendingResult);
+        invariant(isKeyedStream(keyedPendingResult));
+        streams.add(keyedPendingResult.key);
       } else {
+        const subPath = incrementalResult.subPath;
+
+        const incompleteAtPath = subPath
+          ? getObjectAtPath(keyedPendingResult.object, subPath)
+          : keyedPendingResult.object;
+
+        invariant(isObjectLike(incompleteAtPath));
+
         invariant('data' in incrementalResult);
         for (const [key, value] of Object.entries(
           incrementalResult.data as ObjMap<unknown>,
         )) {
           incompleteAtPath[key] = value;
         }
-        embedErrors(this._mergedResult, incrementalResult.errors);
       }
+
+      invariant(!(this._mergedResult instanceof EmbeddedErrors));
+      embedErrors(this._mergedResult, incrementalResult.errors);
     }
-    streams.forEach(onStream);
+    return streams;
+  }
+
+  private _getKeyedPendingResult(
+    id: string,
+    pendingById: Map<string, PendingResult> | undefined,
+  ): KeyedPendingResult {
+    const keyedPendingResult = this._keyedPendingResults.get(id);
+    if (keyedPendingResult !== undefined) {
+      return keyedPendingResult;
+    }
+
+    invariant(pendingById !== undefined);
+    const pendingResult = pendingById.get(id);
+    invariant(pendingResult !== undefined);
+
+    // This handles the case where an incremental result arrives *before*
+    // its corresponding pending result in the same payload.
+    return this._keyPendingResult(id, pendingResult);
   }
 }

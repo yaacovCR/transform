@@ -7,10 +7,12 @@ import type {
 import { isPromise } from '../../jsutils/isPromise.js';
 import type { PromiseOrValue } from '../../jsutils/PromiseOrValue.js';
 
-import { transformResult } from '../transformResult.js';
+import { transform } from '../transform.js';
 
 export function executeSync(args: ExecutionArgs): ExecutionResult {
-  const result = transformResult(args);
+  const result = transform({
+    ...args,
+  });
 
   // Assert that the execution was synchronous.
   if (isPromise(result) || 'initialResult' in result) {
@@ -23,5 +25,5 @@ export function executeSync(args: ExecutionArgs): ExecutionResult {
 export function execute(
   args: ExecutionArgs,
 ): PromiseOrValue<ExecutionResult | ExperimentalIncrementalExecutionResults> {
-  return transformResult(args);
+  return transform(args);
 }
