@@ -103,8 +103,6 @@ export function transform(
     prefix,
   );
 
-  const argsWithNewLabels = context.argsWithNewLabels;
-
   const withExecutors: Array<{
     subschemaConfig: SubschemaConfig;
     operation: OperationDefinitionNode;
@@ -121,7 +119,7 @@ export function transform(
       },
     },
   )) {
-    const { operation, fragments } = argsWithNewLabels;
+    const { operation, fragments } = context;
     const subschema = subschemaConfig.schema;
     const transformedForSubschema = transformForTargetSubschema(
       operation,
@@ -153,7 +151,7 @@ export function transform(
       fragments: transformedFragments,
       executor: () =>
         executor({
-          ...argsWithNewLabels,
+          ...originalArgs,
           schema: subschema,
           operation: transformedOperation,
           fragments: transformedFragments,

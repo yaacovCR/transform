@@ -7,7 +7,6 @@ import type {
   GraphQLObjectType,
   GraphQLOutputType,
   OperationDefinitionNode,
-  ValidatedExecutionArgs,
 } from 'graphql';
 import {
   getDirectiveValues,
@@ -80,14 +79,13 @@ interface StreamUsage {
 
 const collectSubfields = memoize3(
   (
-    validatedExecutionArgs: ValidatedExecutionArgs,
+    context: TransformationContext,
     returnType: GraphQLObjectType,
     fieldDetailsList: ReadonlyArray<FieldDetails>,
   ) => {
-    const { schema, fragments, variableValues, hideSuggestions } =
-      validatedExecutionArgs;
+    const { superschema, fragments, variableValues, hideSuggestions } = context;
     return _collectSubfields(
-      schema,
+      superschema,
       fragments,
       variableValues,
       returnType,
@@ -118,14 +116,14 @@ export function completeInitialResult(
     incrementalDataRecords: [],
   };
 
-  const { schema, variableValues, hideSuggestions } = context.argsWithNewLabels;
+  const { superschema, variableValues, hideSuggestions } = context;
 
-  const rootType = schema.getRootType(operation.operation);
+  const rootType = superschema.getRootType(operation.operation);
   invariant(rootType != null);
 
   const { groupedFieldSet: originalGroupedFieldSet, newDeferUsages } =
     collectFields(
-      schema,
+      superschema,
       fragments,
       variableValues,
       rootType,
@@ -261,7 +259,7 @@ function completeValue(
 
   invariant(isObjectLike(result));
 
-  const { prefix, argsWithNewLabels } = context;
+  const { prefix, superschema } = context;
 
   const typeName = result[prefix];
 
@@ -271,12 +269,12 @@ function completeValue(
 
   invariant(typeof typeName === 'string');
 
-  const runtimeType = argsWithNewLabels.schema.getType(typeName);
+  const runtimeType = superschema.getType(typeName);
 
   invariant(isObjectType(runtimeType));
 
   const { groupedFieldSet: originalGroupedFieldSet, newDeferUsages } =
-    collectSubfields(argsWithNewLabels, runtimeType, fieldDetailsList);
+    collectSubfields(context, runtimeType, fieldDetailsList);
 
   const { groupedFieldSet, newGroupedFieldSets } = buildSubExecutionPlan(
     context,
@@ -373,9 +371,7 @@ function completeObjectValue(
   incrementalContext: IncrementalContext,
   deferMap: ReadonlyMap<DeferUsage, DeferredFragment> | undefined,
 ): ObjMap<unknown> {
-  const {
-    argsWithNewLabels: { schema },
-  } = context;
+  const superschema = context.superschema;
   const completedObject = Object.create(null);
 
   const objectFieldTransformers =
@@ -386,7 +382,7 @@ function completeObjectValue(
       continue;
     }
     const fieldName = fieldDetailsList[0].node.name.value;
-    const fieldDef = schema.getField(runtimeType, fieldName);
+    const fieldDef = superschema.getField(runtimeType, fieldName);
 
     if (fieldDef) {
       const fieldType = fieldDef.type;
@@ -719,7 +715,7 @@ function getStreamUsage(
   const stream = getDirectiveValues(
     GraphQLStreamDirective,
     fieldDetails.node,
-    context.argsWithNewLabels.variableValues,
+    context.variableValues,
     fieldDetails.fragmentVariableValues,
   );
 

@@ -34,6 +34,8 @@ words:
 
   # TODO: contribute upstream
   - deno
+  - superschema
+  - superschemas
   - subschema
   - subschemas
 

@@ -1,16 +1,19 @@
 import type {
   ArgumentNode,
   DirectiveNode,
+  OperationDefinitionNode,
   SelectionNode,
   SelectionSetNode,
-  ValidatedExecutionArgs,
 } from 'graphql';
 import { GraphQLDeferDirective, GraphQLStreamDirective } from 'graphql';
+// eslint-disable-next-line n/no-missing-import
+import type { FragmentDetails } from 'graphql/execution/collectFields.js';
 // eslint-disable-next-line n/no-missing-import
 import { Kind } from 'graphql/language/kinds.js';
 
 import { invariant } from '../jsutils/invariant.js';
 import { mapValue } from '../jsutils/mapValue.js';
+import type { ObjMap } from '../jsutils/ObjMap.js';
 
 interface AddNewLabelsContext {
   prefix: string;
@@ -19,14 +22,14 @@ interface AddNewLabelsContext {
 }
 
 export function addNewLabels(
+  operation: OperationDefinitionNode,
+  fragments: ObjMap<FragmentDetails>,
   prefix: string,
-  originalArgs: ValidatedExecutionArgs,
 ): {
-  argsWithNewLabels: ValidatedExecutionArgs;
+  operation: OperationDefinitionNode;
+  fragments: ObjMap<FragmentDetails>;
   originalLabels: Map<string, string | undefined>;
 } {
-  const { operation, fragments } = originalArgs;
-
   const context: AddNewLabelsContext = {
     prefix,
     incrementalCounter: 0,
@@ -44,21 +47,12 @@ export function addNewLabels(
     },
   }));
 
-  const argsWithNewLabels: ValidatedExecutionArgs = {
-    ...originalArgs,
+  return {
     operation: {
       ...operation,
       selectionSet: transformSelectionSet(context, operation.selectionSet),
     },
-    fragmentDefinitions: mapValue(
-      transformedFragments,
-      ({ definition }) => definition,
-    ),
     fragments: transformedFragments,
-  };
-
-  return {
-    argsWithNewLabels,
     originalLabels: context.originalLabels,
   };
 }

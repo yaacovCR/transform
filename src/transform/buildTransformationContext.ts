@@ -4,12 +4,16 @@ import type {
   GraphQLField,
   GraphQLLeafType,
   GraphQLSchema,
+  OperationDefinitionNode,
   ValidatedExecutionArgs,
 } from 'graphql';
 import type {
+  FragmentDetails,
   GroupedFieldSet,
   // eslint-disable-next-line n/no-missing-import
 } from 'graphql/execution/collectFields.js';
+// eslint-disable-next-line n/no-missing-import
+import type { VariableValues } from 'graphql/execution/values.js';
 
 import { keyMap } from '../jsutils/keyMap.js';
 import type { ObjMap } from '../jsutils/ObjMap.js';
@@ -55,8 +59,12 @@ export interface PathSegmentNode {
 }
 
 export interface TransformationContext {
+  superschema: GraphQLSchema;
   subschemas: ObjMap<SubschemaConfig>;
-  argsWithNewLabels: ValidatedExecutionArgs;
+  operation: OperationDefinitionNode;
+  fragments: ObjMap<FragmentDetails>;
+  variableValues: VariableValues;
+  hideSuggestions: boolean;
   originalLabels: Map<string, string | undefined>;
   pathSegmentRootNode: PathSegmentNode;
   objectFieldTransformers: ObjectFieldTransformers;
@@ -82,10 +90,12 @@ export function buildTransformationContext(
   executionPlanBuilder: ExecutionPlanBuilder,
   prefix: string,
 ): TransformationContext {
-  const { argsWithNewLabels, originalLabels } = addNewLabels(
-    prefix,
-    originalArgs,
-  );
+  const { operation, fragments } = originalArgs;
+  const {
+    operation: operationWithNewLabels,
+    fragments: fragmentsWithNewLabels,
+    originalLabels,
+  } = addNewLabels(operation, fragments, prefix);
 
   const {
     objectFieldTransformers = {},
@@ -93,9 +103,15 @@ export function buildTransformationContext(
     leafTransformers = {},
   } = transformers;
 
+  const { variableValues, hideSuggestions } = originalArgs;
+
   return {
+    superschema: originalArgs.schema,
     subschemas: keyMap(subschemas, (subschema) => subschema.label),
-    argsWithNewLabels,
+    operation: operationWithNewLabels,
+    fragments: fragmentsWithNewLabels,
+    variableValues,
+    hideSuggestions,
     originalLabels,
     objectFieldTransformers,
     pathSegmentRootNode: buildPathSegmentTree(pathScopedFieldTransformers),
