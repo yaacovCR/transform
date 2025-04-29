@@ -51,12 +51,6 @@ export function isCompletedStreamItems(
   return 'stream' in record;
 }
 
-export function isCompletedStreamItems(
-  record: IncrementalGraphEvent,
-): record is StreamItems {
-  return 'stream' in record;
-}
-
 export interface StreamItems {
   stream: Stream;
   errors?: ReadonlyArray<GraphQLError>;
