@@ -1,5 +1,21 @@
 # @yaacovcr/transform
 
+## 0.0.6
+
+### Patch Changes
+
+- a359146: Add initial functionality for composition of subschemas, i.e. stitching.
+
+  This functionality will supplant object extension.
+
+- a359146: Change main export to `transform` from `transformResult`.
+
+  Instead of processing an existing result, the function delegates the request directly to the underlying service using a gateway-style approach.
+
+- 61b888a: Remove path-scoped object extenders.
+
+  While workable for non-incremental requests, API for modifying existing deferred fragments would be quite complex.
+
 ## 0.0.5
 
 ### Patch Changes
