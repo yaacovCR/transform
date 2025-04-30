@@ -1,12 +1,6 @@
-import type {
-  ExecutionArgs,
-  ExecutionResult,
-  GraphQLError,
-  OperationDefinitionNode,
-} from 'graphql';
+import type { ExecutionArgs, ExecutionResult, GraphQLError } from 'graphql';
 import { experimentalExecuteQueryOrMutationOrSubscriptionEvent } from 'graphql';
 import type {
-  FragmentDetails,
   GroupedFieldSet,
   // eslint-disable-next-line n/no-missing-import
 } from 'graphql/execution/collectFields.js';
@@ -103,14 +97,12 @@ export function transform(
     prefix,
   );
 
-  const withExecutors: Array<{
-    subschemaConfig: SubschemaConfig;
-    operation: OperationDefinitionNode;
-    fragments: ObjMap<FragmentDetails>;
-    executor: () => PromiseOrValue<
-      ExecutionResult | ExperimentalIncrementalExecutionResults
-    >;
-  }> = [];
+  const mergedResult = new MergedResult();
+  const transformedResults: Array<
+    PromiseOrValue<ExecutionResult | CompletedInitialResult>
+  > = [];
+
+  let containsPromise = false;
   for (const subschemaConfig of Object.values(
     args.subschemas ?? {
       target: {
@@ -129,8 +121,8 @@ export function transform(
     );
 
     if (!('operation' in transformedForSubschema)) {
-      // return `data: null` to mimic non-gateway behavior
-      return { data: null, errors: transformedForSubschema };
+      transformedResults.push({ data: null, errors: transformedForSubschema });
+      continue;
     }
 
     const executor: Executor =
@@ -145,56 +137,38 @@ export function transform(
       (details) => details.definition,
     );
 
-    withExecutors.push({
-      subschemaConfig,
+    const originalResult = executor({
+      ...originalArgs,
+      schema: subschema,
       operation: transformedOperation,
       fragments: transformedFragments,
-      executor: () =>
-        executor({
-          ...originalArgs,
-          schema: subschema,
-          operation: transformedOperation,
-          fragments: transformedFragments,
-          fragmentDefinitions: transformedFragmentDefinitions,
-        }),
+      fragmentDefinitions: transformedFragmentDefinitions,
     });
-  }
 
-  const mergedResult = new MergedResult();
-  const transformedResults: Array<
-    PromiseOrValue<ExecutionResult | CompletedInitialResult>
-  > = [];
-
-  let containsPromise = false;
-  for (const {
-    subschemaConfig,
-    operation,
-    fragments,
-    executor,
-  } of withExecutors) {
-    const originalResult = executor();
     const subschemaLabel = subschemaConfig.label;
     if (isPromise(originalResult)) {
       containsPromise = true;
       transformedResults.push(
-        originalResult.then((resolved) => {
-          mergedResult.add(subschemaLabel, resolved);
-          return completeInitialResult(
+        originalResult.then((resolved) =>
+          completeInitialResult(
             context,
-            operation,
-            fragments,
-            mergedResult.getMergedData(),
-          );
-        }),
+            transformedOperation,
+            transformedFragments,
+            subschemaConfig.label,
+            resolved,
+            mergedResult,
+          ),
+        ),
       );
       continue;
     }
-    mergedResult.add(subschemaLabel, originalResult);
     const transformed = completeInitialResult(
       context,
-      operation,
-      fragments,
-      mergedResult.getMergedData(),
+      transformedOperation,
+      transformedFragments,
+      subschemaLabel,
+      originalResult,
+      mergedResult,
     );
     // TODO: add test case for asynchronous transform
     /* c8 ignore next 3 */

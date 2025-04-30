@@ -1,5 +1,6 @@
 import type {
   ExecutionResult,
+  ExperimentalIncrementalExecutionResults,
   GraphQLError,
   GraphQLField,
   GraphQLLeafType,
@@ -48,6 +49,7 @@ import type {
 } from './buildTransformationContext.js';
 import { EmbeddedErrors } from './EmbeddedError.js';
 import { filter } from './filter.js';
+import type { MergedResult } from './MergedResult.js';
 import type {
   DeferredFragment,
   ExecutionGroupResult,
@@ -95,12 +97,17 @@ const collectSubfields = memoize3(
   },
 );
 
+// eslint-disable-next-line @typescript-eslint/max-params
 export function completeInitialResult(
   context: TransformationContext,
   operation: OperationDefinitionNode,
   fragments: ObjMap<FragmentDetails>,
-  originalData: ObjMap<unknown> | EmbeddedErrors,
+  subschemaLabel: string,
+  originalResult: ExecutionResult | ExperimentalIncrementalExecutionResults,
+  mergedResult: MergedResult,
 ): ExecutionResult | PromiseOrValue<CompletedInitialResult> {
+  mergedResult.add(subschemaLabel, originalResult);
+  const originalData = mergedResult.getMergedData();
   if (originalData instanceof EmbeddedErrors) {
     return {
       errors: originalData.errors,
