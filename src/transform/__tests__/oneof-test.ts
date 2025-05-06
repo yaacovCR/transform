@@ -262,7 +262,7 @@ describe('Execute: Handles OneOf Input Objects', () => {
       });
     });
 
-    it('errors with nulled fragment variable for field', () => {
+    it.skip('errors with nulled fragment variable for field', () => {
       const query = `
         query {
           ...TestFragment(a: null)

@@ -277,7 +277,8 @@ describe('Execute: Union and intersection types', () => {
       }
     `);
 
-    // name, barks, meows invalid without type conditions
+    // invalid fields are dropped during transformation prior to forwarding,
+    // ultimately resolving to null
     expect(executeSync({ schema, document, rootValue: john })).to.deep.equal({
       data: {
         __typename: 'Person',
@@ -285,9 +286,13 @@ describe('Execute: Union and intersection types', () => {
         pets: [
           {
             __typename: 'Cat',
+            name: null,
+            meows: null,
           },
           {
             __typename: 'Dog',
+            name: null,
+            barks: null,
           },
         ],
       },
@@ -349,13 +354,15 @@ describe('Execute: Union and intersection types', () => {
       }
     `);
 
+    // invalid fields are dropped during transformation prior to forwarding,
+    // ultimately resolving to null
     expect(executeSync({ schema, document, rootValue: john })).to.deep.equal({
       data: {
         __typename: 'Person',
         name: 'John',
         friends: [
           { __typename: 'Person', name: 'Liz' },
-          { __typename: 'Dog', name: 'Odie' }, // 'barks' skipped as invalid without type condition
+          { __typename: 'Dog', name: 'Odie', barks: null },
         ],
       },
     });

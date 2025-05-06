@@ -1,7 +1,20 @@
-import type { ExecutionArgs, ExecutionResult, GraphQLError } from 'graphql';
-import { experimentalExecuteQueryOrMutationOrSubscriptionEvent } from 'graphql';
 import type {
+  ExecutionArgs,
+  ExecutionResult,
+  GraphQLObjectType,
+  GraphQLSchema,
+} from 'graphql';
+import {
+  experimentalExecuteQueryOrMutationOrSubscriptionEvent,
+  GraphQLError,
+} from 'graphql';
+import type {
+  FieldDetails,
   GroupedFieldSet,
+  // eslint-disable-next-line n/no-missing-import
+} from 'graphql/execution/collectFields.js';
+import {
+  collectFields,
   // eslint-disable-next-line n/no-missing-import
 } from 'graphql/execution/collectFields.js';
 // eslint-disable-next-line n/no-missing-import
@@ -11,6 +24,7 @@ import type {
   // eslint-disable-next-line n/no-missing-import
 } from 'graphql/execution/types.js';
 
+import { invariant } from '../jsutils/invariant.js';
 import { isPromise } from '../jsutils/isPromise.js';
 import { mapValue } from '../jsutils/mapValue.js';
 import type { ObjMap } from '../jsutils/ObjMap.js';
@@ -30,10 +44,11 @@ import { completeInitialResult } from './completeValue.js';
 import { getDefaultPayloadPublisher } from './getDefaultPayloadPublisher.js';
 import type { LegacyExperimentalIncrementalExecutionResults } from './getLegacyPayloadPublisher.js';
 import { getLegacyPayloadPublisher } from './getLegacyPayloadPublisher.js';
+import { groupedFieldSetToSelectionSet } from './groupedFieldSetToSelectionSet.js';
 import { IncrementalPublisher } from './IncrementalPublisher.js';
 import { MergedResult } from './MergedResult.js';
 import type { PayloadPublisher } from './PayloadPublisher.js';
-import { transformForTargetSubschema } from './transformForTargetSubschema.js';
+import { transformSelectionSetForTargetSubschema } from './transformSelectionSetForTargetSubschema.js';
 import type { DeferredFragment, IncrementalDataRecord } from './types.js';
 
 export interface TransformArgs extends ExecutionArgs {
@@ -102,6 +117,7 @@ export function transform(
     PromiseOrValue<ExecutionResult | CompletedInitialResult>
   > = [];
 
+  const usedKeys = new Set<string>();
   let containsPromise = false;
   for (const subschemaConfig of Object.values(
     args.subschemas ?? {
@@ -111,50 +127,90 @@ export function transform(
       },
     },
   )) {
-    const { operation, fragments } = context;
-    const subschema = subschemaConfig.schema;
-    const transformedForSubschema = transformForTargetSubschema(
+    const {
+      superschema,
       operation,
       fragments,
+      variableValues,
+      fragmentsBySubschema,
+      hideSuggestions,
+    } = context;
+
+    const { schema: subschema, label: subschemaLabel } = subschemaConfig;
+
+    const superschemaRootType = superschema.getRootType(operation.operation);
+    if (superschemaRootType == null) {
+      return {
+        data: null,
+        errors: [
+          new GraphQLError(
+            `Schema is not configured to execute ${operation.operation} operation.`,
+            {
+              nodes: [operation],
+            },
+          ),
+        ],
+      };
+    }
+
+    const transformedFragments = fragmentsBySubschema[subschemaLabel];
+
+    const { groupedFieldSet: originalGroupedFieldSet, newDeferUsages } =
+      collectFields(
+        superschema,
+        fragments,
+        variableValues,
+        superschemaRootType,
+        operation.selectionSet,
+        hideSuggestions,
+      );
+
+    const subschemaRootType = subschema.getRootType(operation.operation);
+    invariant(subschemaRootType != null);
+
+    const filteredGroupedFieldSet = filterGroupedFieldSet(
+      originalGroupedFieldSet,
       subschema,
-      prefix,
+      subschemaRootType,
+      usedKeys,
     );
 
-    if (!('operation' in transformedForSubschema)) {
-      transformedResults.push({ data: null, errors: transformedForSubschema });
-      continue;
-    }
+    const selectionSet = groupedFieldSetToSelectionSet(filteredGroupedFieldSet);
 
     const executor: Executor =
       subschemaConfig.executor ??
       experimentalExecuteQueryOrMutationOrSubscriptionEvent;
 
-    const { operation: transformedOperation, fragments: transformedFragments } =
-      transformedForSubschema;
-
-    const transformedFragmentDefinitions = mapValue(
-      transformedFragments,
-      (details) => details.definition,
-    );
-
     const originalResult = executor({
       ...originalArgs,
       schema: subschema,
-      operation: transformedOperation,
+      operation: {
+        ...operation,
+        selectionSet: transformSelectionSetForTargetSubschema(
+          selectionSet,
+          transformedFragments,
+          subschemaRootType,
+          subschema,
+          prefix,
+        ),
+      },
       fragments: transformedFragments,
-      fragmentDefinitions: transformedFragmentDefinitions,
+      fragmentDefinitions: mapValue(
+        transformedFragments,
+        (details) => details.definition,
+      ),
     });
 
-    const subschemaLabel = subschemaConfig.label;
     if (isPromise(originalResult)) {
       containsPromise = true;
       transformedResults.push(
         originalResult.then((resolved) =>
           completeInitialResult(
             context,
-            transformedOperation,
-            transformedFragments,
-            subschemaConfig.label,
+            superschemaRootType,
+            filteredGroupedFieldSet,
+            newDeferUsages,
+            subschemaLabel,
             resolved,
             mergedResult,
           ),
@@ -164,8 +220,9 @@ export function transform(
     }
     const transformed = completeInitialResult(
       context,
-      transformedOperation,
-      transformedFragments,
+      superschemaRootType,
+      filteredGroupedFieldSet,
+      newDeferUsages,
       subschemaLabel,
       originalResult,
       mergedResult,
@@ -189,6 +246,29 @@ export function transform(
     mergedResult,
     payloadPublisher,
   );
+}
+
+function filterGroupedFieldSet(
+  originalGroupedFieldSet: GroupedFieldSet,
+  subschema: GraphQLSchema,
+  parentType: GraphQLObjectType,
+  usedKeys: Set<string>,
+): GroupedFieldSet {
+  const filteredMap = new Map<string, ReadonlyArray<FieldDetails>>();
+
+  for (const [responseKey, fieldDetailsList] of originalGroupedFieldSet) {
+    if (usedKeys.has(responseKey)) {
+      continue;
+    }
+
+    const fieldName = fieldDetailsList[0].node.name.value;
+    const fieldDef = subschema.getField(parentType, fieldName);
+    if (fieldDef) {
+      filteredMap.set(responseKey, fieldDetailsList);
+      usedKeys.add(responseKey);
+    }
+  }
+  return filteredMap;
 }
 
 function buildResponse<TSubsequent, TIncremental>(

@@ -7,7 +7,6 @@ import type {
   GraphQLNullableOutputType,
   GraphQLObjectType,
   GraphQLOutputType,
-  OperationDefinitionNode,
 } from 'graphql';
 import {
   getDirectiveValues,
@@ -21,12 +20,10 @@ import {
 import type {
   DeferUsage,
   FieldDetails,
-  FragmentDetails,
   GroupedFieldSet,
   // eslint-disable-next-line n/no-missing-import
 } from 'graphql/execution/collectFields.js';
 import {
-  collectFields,
   collectSubfields as _collectSubfields,
   // eslint-disable-next-line n/no-missing-import
 } from 'graphql/execution/collectFields.js';
@@ -100,8 +97,9 @@ const collectSubfields = memoize3(
 // eslint-disable-next-line @typescript-eslint/max-params
 export function completeInitialResult(
   context: TransformationContext,
-  operation: OperationDefinitionNode,
-  fragments: ObjMap<FragmentDetails>,
+  rootType: GraphQLObjectType,
+  originalGroupedFieldSet: GroupedFieldSet,
+  newDeferUsages: ReadonlyArray<DeferUsage>,
   subschemaLabel: string,
   originalResult: ExecutionResult | ExperimentalIncrementalExecutionResults,
   mergedResult: MergedResult,
@@ -122,21 +120,6 @@ export function completeInitialResult(
     deferredFragments: [],
     incrementalDataRecords: [],
   };
-
-  const { superschema, variableValues, hideSuggestions } = context;
-
-  const rootType = superschema.getRootType(operation.operation);
-  invariant(rootType != null);
-
-  const { groupedFieldSet: originalGroupedFieldSet, newDeferUsages } =
-    collectFields(
-      superschema,
-      fragments,
-      variableValues,
-      rootType,
-      operation.selectionSet,
-      hideSuggestions,
-    );
 
   const { groupedFieldSet, newGroupedFieldSets } = context.executionPlanBuilder(
     originalGroupedFieldSet,
@@ -385,9 +368,6 @@ function completeObjectValue(
     context.objectFieldTransformers[runtimeType.name];
   const children = pathSegmentNode?.children;
   for (const [responseName, fieldDetailsList] of groupedFieldSet) {
-    if (responseName === context.prefix) {
-      continue;
-    }
     const fieldName = fieldDetailsList[0].node.name.value;
     const fieldDef = superschema.getField(runtimeType, fieldName);
 
