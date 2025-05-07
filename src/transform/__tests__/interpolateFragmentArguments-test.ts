@@ -17,11 +17,10 @@ function testInterpolation(source: string, expected: string): void {
 describe('interpolateFragmentArguments', () => {
   it('should interpolate arguments', () => {
     testInterpolation(
-      `
-        query TestQuery {
+      `query TestQuery {
           ...MyFragment(fragVar: "hello")
         }
-        
+
         fragment MyFragment($fragVar: String) on Query {
           field(arg1: $fragVar)
         }
@@ -30,7 +29,7 @@ describe('interpolateFragmentArguments', () => {
         query TestQuery {
           ...MyFragment_interpolated_0
         }
-        
+
         fragment MyFragment_interpolated_0 on Query {
           field(arg1: "hello")
         }
@@ -44,7 +43,7 @@ describe('interpolateFragmentArguments', () => {
         query TestQuery {
           ...MyFragment(fragVar1: "specific")
         }
-        
+
         fragment MyFragment($fragVar1: String, $fragVar2: String = "defaultVal") on Query {
           field(arg1: $fragVar1, arg2: $fragVar2)
         }
@@ -53,7 +52,7 @@ describe('interpolateFragmentArguments', () => {
         query TestQuery {
           ...MyFragment_interpolated_0
         }
-        
+
         fragment MyFragment_interpolated_0 on Query {
           field(arg1: "specific", arg2: "defaultVal")
         }
@@ -67,7 +66,7 @@ describe('interpolateFragmentArguments', () => {
         query TestQuery {
           ...MyFragment(fragVar1: "specific", fragVar2: null)
         }
-        
+
         fragment MyFragment($fragVar1: String, $fragVar2: String = "defaultVal") on Query {
           field(arg1: $fragVar1, arg2: $fragVar2)
         }
@@ -76,7 +75,7 @@ describe('interpolateFragmentArguments', () => {
         query TestQuery {
           ...MyFragment_interpolated_0
         }
-        
+
         fragment MyFragment_interpolated_0 on Query {
           field(arg1: "specific", arg2: null)
         }
@@ -92,7 +91,7 @@ describe('interpolateFragmentArguments', () => {
           ...MyFragment(fragVar: "val2")
           ...MyFragment(fragVar: "val1")
         }
-        
+
         fragment MyFragment($fragVar: String) on Query {
           field(arg: $fragVar)
         }
@@ -103,11 +102,11 @@ describe('interpolateFragmentArguments', () => {
           ...MyFragment_interpolated_1
           ...MyFragment_interpolated_0
         }
-        
+
         fragment MyFragment_interpolated_0 on Query {
           field(arg: "val1")
         }
-        
+
         fragment MyFragment_interpolated_1 on Query {
           field(arg: "val2")
         }
@@ -121,7 +120,7 @@ describe('interpolateFragmentArguments', () => {
         query TestQuery($opVar: String) {
           ...MyFragment(fragVar: $opVar)
         }
-        
+
         fragment MyFragment($fragVar: String) on Query {
           field(arg: $fragVar)
         }
@@ -130,7 +129,7 @@ describe('interpolateFragmentArguments', () => {
         query TestQuery($opVar: String) {
           ...MyFragment_interpolated_0
         }
-        
+
         fragment MyFragment_interpolated_0 on Query {
           field(arg: $opVar)
         }
@@ -144,7 +143,7 @@ describe('interpolateFragmentArguments', () => {
         query TestQuery($varWithoutDefault: String) {
           ...MyFragment(varWithArg: "supplied")
         }
-        
+
         fragment MyFragment($varWithArg: String, $varWithoutDefault: String) on Query {
           field1(arg: $varWithArg)
           field2(arg: $varWithoutDefault)
@@ -154,7 +153,7 @@ describe('interpolateFragmentArguments', () => {
         query TestQuery($varWithoutDefault: String, $missing_fragment_variable_varWithoutDefault_0: String) {
           ...MyFragment_interpolated_0
         }
-        
+
         fragment MyFragment_interpolated_0 on Query {
           field1(arg: "supplied")
           field2(arg: $missing_fragment_variable_varWithoutDefault_0)
@@ -169,11 +168,11 @@ describe('interpolateFragmentArguments', () => {
         query TestQuery {
           ...Outer
         }
-        
+
         fragment Outer($varWithoutDefault: String) on Query {
           ...Inner
         }
-        
+
         fragment Inner($varWithoutDefault: String) on Query {
           field(arg: $varWithoutDefault)
         }
@@ -182,7 +181,7 @@ describe('interpolateFragmentArguments', () => {
         query TestQuery($missing_fragment_variable_varWithoutDefault_1: String) {
           ...Outer_interpolated_0
         }
-        
+
         fragment Inner_interpolated_0 on Query {
           field(arg: $missing_fragment_variable_varWithoutDefault_1)
         }
@@ -200,7 +199,7 @@ describe('interpolateFragmentArguments', () => {
         query TestQuery($varWithDefaultOnFragment: String) {
           ...MyFragment(varWithArg: "supplied")
         }
-        
+
         fragment MyFragment($varWithArg: String, $varWithDefaultOnFragment: String = "default") on Query {
           field1(arg: $varWithArg)
           field2(arg: $varWithDefaultOnFragment)
@@ -210,7 +209,7 @@ describe('interpolateFragmentArguments', () => {
         query TestQuery($varWithDefaultOnFragment: String) {
           ...MyFragment_interpolated_0
         }
-        
+
         fragment MyFragment_interpolated_0 on Query {
           field1(arg: "supplied")
           field2(arg: "default")
@@ -225,11 +224,11 @@ describe('interpolateFragmentArguments', () => {
         query TestQuery($opVar: String) {
           ...OuterFragment(outerVar: "outerValue")
         }
-        
+
         fragment InnerFragment($innerVar: String) on Query {
           innerField(arg: $innerVar)
         }
-        
+
         fragment OuterFragment($outerVar: String) on Query {
           outerField(arg: $outerVar)
           ...InnerFragment(innerVar: $outerVar)
@@ -239,11 +238,11 @@ describe('interpolateFragmentArguments', () => {
         query TestQuery($opVar: String) {
           ...OuterFragment_interpolated_0
         }
-        
+
         fragment InnerFragment_interpolated_0 on Query {
           innerField(arg: "outerValue")
         }
-        
+
         fragment OuterFragment_interpolated_0 on Query {
           outerField(arg: "outerValue")
           ...InnerFragment_interpolated_0
@@ -258,7 +257,7 @@ describe('interpolateFragmentArguments', () => {
         query TestQuery {
           ...MyFragment(listArg: [1, 2], objArg: {a: "val", b: 3})
         }
-        
+
         fragment MyFragment($listArg: [Int], $objArg: MyInput) on Query {
           field(l: $listArg, o: $objArg)
         }
@@ -267,7 +266,7 @@ describe('interpolateFragmentArguments', () => {
         query TestQuery {
           ...MyFragment_interpolated_0
         }
-        
+
         fragment MyFragment_interpolated_0 on Query {
           field(l: [1, 2], o: { a: "val", b: 3 })
         }
@@ -281,11 +280,11 @@ describe('interpolateFragmentArguments', () => {
         query Q($opValue: String = "op") {
           ...a
         }
-        
+
         fragment a($aValue: String, $bValue: String) on TestType {
           ...b(aValue: { a: $aValue, b: "B" }, bValue: [$bValue, $opValue])
         }
-        
+
         fragment b($aValue: MyInput, $bValue: [String], $cValue: String) on TestType {
           aList: list(input: $aValue)
           bList: list(input: $bValue)
@@ -296,7 +295,7 @@ describe('interpolateFragmentArguments', () => {
         query Q($opValue: String = "op", $missing_fragment_variable_aValue_0: String, $missing_fragment_variable_bValue_0: String, $missing_fragment_variable_cValue_0: String) {
           ...a_interpolated_0
         }
-        
+
         fragment b_interpolated_0 on TestType {
           aList: list(input: { a: $missing_fragment_variable_aValue_0, b: "B" })
           bList: list(input: [$missing_fragment_variable_bValue_0, $opValue])
@@ -316,15 +315,15 @@ describe('interpolateFragmentArguments', () => {
         {
           ...A(arg: "arg")
         }
-        
+
         fragment A($arg: String) on Query {
           ...B(arg: $arg)
         }
-        
+
         fragment B($arg: String) on Query {
           ...C(arg: $arg)
         }
-        
+
         fragment C($arg: String) on Query {
           ...A
         }
@@ -337,7 +336,7 @@ describe('interpolateFragmentArguments', () => {
         fragment C_interpolated_0 on Query {
           ...A
         }
-        
+
         fragment B_interpolated_0 on Query {
           ...C_interpolated_0
         }
@@ -355,7 +354,7 @@ describe('interpolateFragmentArguments', () => {
         {
           ...MyFragment(knownArg: "known", unknownArg: "unknown")
         }
-        
+
         fragment MyFragment($knownArg: String) on Query {
           field(arg: $knownArg)
         }
