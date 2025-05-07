@@ -1,13 +1,10 @@
 import type {
   FieldNode,
-  FragmentDefinitionNode,
   GraphQLCompositeType,
   GraphQLSchema,
-  OperationDefinitionNode,
   SelectionSetNode,
 } from 'graphql';
 import {
-  GraphQLError,
   Kind,
   TypeInfo,
   TypeNameMetaFieldDef,
@@ -18,88 +15,20 @@ import {
 import type { FragmentDetails } from 'graphql/execution/collectFields.js';
 
 import { invariant } from '../jsutils/invariant.js';
-import { mapValue } from '../jsutils/mapValue.js';
 import type { ObjMap } from '../jsutils/ObjMap.js';
 
-export function transformForTargetSubschema(
-  operation: OperationDefinitionNode,
-  fragments: ObjMap<FragmentDetails>,
-  targetSchema: GraphQLSchema,
-  prefix: string,
-):
-  | {
-      operation: OperationDefinitionNode;
-      fragments: ObjMap<FragmentDetails>;
-    }
-  | ReadonlyArray<GraphQLError> {
-  const fragmentDefinitions = mapValue(
-    fragments,
-    (details) => details.definition,
-  );
-
-  const transformedFragments = mapValue(fragments, (details) => {
-    const definition = details.definition;
-    const { typeCondition, selectionSet } = definition;
-    const typeName = typeCondition.name.value;
-    const type = targetSchema.getType(typeName) as GraphQLCompositeType;
-    invariant(type != null);
-    return {
-      ...details,
-      definition: {
-        ...definition,
-        selectionSet: transformSelectionSet(
-          targetSchema,
-          selectionSet,
-          type,
-          prefix,
-          fragmentDefinitions,
-        ),
-      },
-    };
-  });
-
-  const { operation: operationType, selectionSet } = operation;
-  const rootType = targetSchema.getRootType(operationType);
-  if (rootType == null) {
-    return [
-      new GraphQLError(
-        `Schema is not configured to execute ${operation.operation} operation.`,
-        {
-          nodes: [operation],
-        },
-      ),
-    ];
-  }
-
-  const transformedOperation = {
-    ...operation,
-    selectionSet: transformSelectionSet(
-      targetSchema,
-      selectionSet,
-      rootType,
-      prefix,
-      fragmentDefinitions,
-    ),
-  };
-
-  return {
-    operation: transformedOperation,
-    fragments: transformedFragments,
-  };
-}
-
-function transformSelectionSet(
-  targetSchema: GraphQLSchema,
+export function transformSelectionSetForTargetSubschema(
   selectionSet: SelectionSetNode,
-  initialType: GraphQLCompositeType,
+  fragments: ObjMap<FragmentDetails>,
+  parentType: GraphQLCompositeType,
+  targetSchema: GraphQLSchema,
   prefix: string,
-  fragmentDefinitions: ObjMap<FragmentDefinitionNode>,
 ): SelectionSetNode {
-  const typeInfo = new TypeInfo(targetSchema, initialType);
+  const typeInfo = new TypeInfo(targetSchema, parentType);
 
   const visitor = visitWithTypeInfo(typeInfo, {
     FragmentSpread(node) {
-      const fragment = fragmentDefinitions[node.name.value];
+      const fragment = fragments[node.name.value].definition;
       invariant(fragment !== undefined);
       const typeName = fragment.typeCondition.name.value;
       const type = targetSchema.getType(typeName);
@@ -128,7 +57,6 @@ function transformSelectionSet(
         return null;
       }
       if (node.selectionSet) {
-        // TODO: add test case
         /* c8 ignore next 3 */
         if (node.selectionSet.selections.length === 0) {
           return null;

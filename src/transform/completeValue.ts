@@ -1,13 +1,12 @@
 import type {
   ExecutionResult,
+  ExperimentalIncrementalExecutionResults,
   GraphQLError,
   GraphQLField,
   GraphQLLeafType,
   GraphQLNullableOutputType,
   GraphQLObjectType,
   GraphQLOutputType,
-  OperationDefinitionNode,
-  ValidatedExecutionArgs,
 } from 'graphql';
 import {
   getDirectiveValues,
@@ -21,12 +20,10 @@ import {
 import type {
   DeferUsage,
   FieldDetails,
-  FragmentDetails,
   GroupedFieldSet,
   // eslint-disable-next-line n/no-missing-import
 } from 'graphql/execution/collectFields.js';
 import {
-  collectFields,
   collectSubfields as _collectSubfields,
   // eslint-disable-next-line n/no-missing-import
 } from 'graphql/execution/collectFields.js';
@@ -49,6 +46,7 @@ import type {
 } from './buildTransformationContext.js';
 import { EmbeddedErrors } from './EmbeddedError.js';
 import { filter } from './filter.js';
+import type { MergedResult } from './MergedResult.js';
 import type {
   DeferredFragment,
   ExecutionGroupResult,
@@ -80,14 +78,13 @@ interface StreamUsage {
 
 const collectSubfields = memoize3(
   (
-    validatedExecutionArgs: ValidatedExecutionArgs,
+    context: TransformationContext,
     returnType: GraphQLObjectType,
     fieldDetailsList: ReadonlyArray<FieldDetails>,
   ) => {
-    const { schema, fragments, variableValues, hideSuggestions } =
-      validatedExecutionArgs;
+    const { superschema, fragments, variableValues, hideSuggestions } = context;
     return _collectSubfields(
-      schema,
+      superschema,
       fragments,
       variableValues,
       returnType,
@@ -97,12 +94,18 @@ const collectSubfields = memoize3(
   },
 );
 
+// eslint-disable-next-line @typescript-eslint/max-params
 export function completeInitialResult(
   context: TransformationContext,
-  operation: OperationDefinitionNode,
-  fragments: ObjMap<FragmentDetails>,
-  originalData: ObjMap<unknown> | EmbeddedErrors,
+  rootType: GraphQLObjectType,
+  originalGroupedFieldSet: GroupedFieldSet,
+  newDeferUsages: ReadonlyArray<DeferUsage>,
+  subschemaLabel: string,
+  originalResult: ExecutionResult | ExperimentalIncrementalExecutionResults,
+  mergedResult: MergedResult,
 ): ExecutionResult | PromiseOrValue<CompletedInitialResult> {
+  mergedResult.add(subschemaLabel, originalResult);
+  const originalData = mergedResult.getMergedData();
   if (originalData instanceof EmbeddedErrors) {
     return {
       errors: originalData.errors,
@@ -117,21 +120,6 @@ export function completeInitialResult(
     deferredFragments: [],
     incrementalDataRecords: [],
   };
-
-  const { schema, variableValues, hideSuggestions } = context.argsWithNewLabels;
-
-  const rootType = schema.getRootType(operation.operation);
-  invariant(rootType != null);
-
-  const { groupedFieldSet: originalGroupedFieldSet, newDeferUsages } =
-    collectFields(
-      schema,
-      fragments,
-      variableValues,
-      rootType,
-      operation.selectionSet,
-      hideSuggestions,
-    );
 
   const { groupedFieldSet, newGroupedFieldSets } = context.executionPlanBuilder(
     originalGroupedFieldSet,
@@ -261,7 +249,7 @@ function completeValue(
 
   invariant(isObjectLike(result));
 
-  const { prefix, argsWithNewLabels } = context;
+  const { prefix, superschema } = context;
 
   const typeName = result[prefix];
 
@@ -271,12 +259,12 @@ function completeValue(
 
   invariant(typeof typeName === 'string');
 
-  const runtimeType = argsWithNewLabels.schema.getType(typeName);
+  const runtimeType = superschema.getType(typeName);
 
   invariant(isObjectType(runtimeType));
 
   const { groupedFieldSet: originalGroupedFieldSet, newDeferUsages } =
-    collectSubfields(argsWithNewLabels, runtimeType, fieldDetailsList);
+    collectSubfields(context, runtimeType, fieldDetailsList);
 
   const { groupedFieldSet, newGroupedFieldSets } = buildSubExecutionPlan(
     context,
@@ -373,20 +361,15 @@ function completeObjectValue(
   incrementalContext: IncrementalContext,
   deferMap: ReadonlyMap<DeferUsage, DeferredFragment> | undefined,
 ): ObjMap<unknown> {
-  const {
-    argsWithNewLabels: { schema },
-  } = context;
+  const superschema = context.superschema;
   const completedObject = Object.create(null);
 
   const objectFieldTransformers =
     context.objectFieldTransformers[runtimeType.name];
   const children = pathSegmentNode?.children;
   for (const [responseName, fieldDetailsList] of groupedFieldSet) {
-    if (responseName === context.prefix) {
-      continue;
-    }
     const fieldName = fieldDetailsList[0].node.name.value;
-    const fieldDef = schema.getField(runtimeType, fieldName);
+    const fieldDef = superschema.getField(runtimeType, fieldName);
 
     if (fieldDef) {
       const fieldType = fieldDef.type;
@@ -719,7 +702,7 @@ function getStreamUsage(
   const stream = getDirectiveValues(
     GraphQLStreamDirective,
     fieldDetails.node,
-    context.argsWithNewLabels.variableValues,
+    context.variableValues,
     fieldDetails.fragmentVariableValues,
   );
 

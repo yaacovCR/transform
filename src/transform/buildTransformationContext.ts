@@ -1,16 +1,22 @@
 import type {
   ExecutionResult,
   ExperimentalIncrementalExecutionResults,
+  GraphQLCompositeType,
   GraphQLField,
   GraphQLLeafType,
   GraphQLSchema,
+  OperationDefinitionNode,
   ValidatedExecutionArgs,
 } from 'graphql';
 import type {
+  FragmentDetails,
   GroupedFieldSet,
   // eslint-disable-next-line n/no-missing-import
 } from 'graphql/execution/collectFields.js';
+// eslint-disable-next-line n/no-missing-import
+import type { VariableValues } from 'graphql/execution/values.js';
 
+import { invariant } from '../jsutils/invariant.js';
 import { keyMap } from '../jsutils/keyMap.js';
 import type { ObjMap } from '../jsutils/ObjMap.js';
 import type { Path } from '../jsutils/Path.js';
@@ -18,6 +24,7 @@ import type { PromiseOrValue } from '../jsutils/PromiseOrValue.js';
 
 import { addNewLabels } from './addNewLabels.js';
 import type { DeferUsageSet, ExecutionPlan } from './buildExecutionPlan.js';
+import { transformSelectionSetForTargetSubschema } from './transformSelectionSetForTargetSubschema.js';
 
 export type ExecutionPlanBuilder = (
   originalGroupedFieldSet: GroupedFieldSet,
@@ -55,8 +62,13 @@ export interface PathSegmentNode {
 }
 
 export interface TransformationContext {
+  superschema: GraphQLSchema;
   subschemas: ObjMap<SubschemaConfig>;
-  argsWithNewLabels: ValidatedExecutionArgs;
+  operation: OperationDefinitionNode;
+  fragments: ObjMap<FragmentDetails>;
+  fragmentsBySubschema: ObjMap<ObjMap<FragmentDetails>>;
+  variableValues: VariableValues;
+  hideSuggestions: boolean;
   originalLabels: Map<string, string | undefined>;
   pathSegmentRootNode: PathSegmentNode;
   objectFieldTransformers: ObjectFieldTransformers;
@@ -82,10 +94,12 @@ export function buildTransformationContext(
   executionPlanBuilder: ExecutionPlanBuilder,
   prefix: string,
 ): TransformationContext {
-  const { argsWithNewLabels, originalLabels } = addNewLabels(
-    prefix,
-    originalArgs,
-  );
+  const { operation, fragments } = originalArgs;
+  const {
+    operation: operationWithNewLabels,
+    fragments: fragmentsWithNewLabels,
+    originalLabels,
+  } = addNewLabels(operation, fragments, prefix);
 
   const {
     objectFieldTransformers = {},
@@ -93,9 +107,20 @@ export function buildTransformationContext(
     leafTransformers = {},
   } = transformers;
 
+  const { variableValues, hideSuggestions } = originalArgs;
+
   return {
+    superschema: originalArgs.schema,
     subschemas: keyMap(subschemas, (subschema) => subschema.label),
-    argsWithNewLabels,
+    operation: operationWithNewLabels,
+    fragments: fragmentsWithNewLabels,
+    fragmentsBySubschema: getFragmentsBySubschema(
+      subschemas,
+      fragmentsWithNewLabels,
+      prefix,
+    ),
+    variableValues,
+    hideSuggestions,
     originalLabels,
     objectFieldTransformers,
     pathSegmentRootNode: buildPathSegmentTree(pathScopedFieldTransformers),
@@ -103,6 +128,42 @@ export function buildTransformationContext(
     executionPlanBuilder,
     prefix,
   };
+}
+
+function getFragmentsBySubschema(
+  subschemas: ReadonlyArray<SubschemaConfig>,
+  fragments: ObjMap<FragmentDetails>,
+  prefix: string,
+): ObjMap<ObjMap<FragmentDetails>> {
+  const fragmentsBySubschema: ObjMap<ObjMap<FragmentDetails>> =
+    Object.create(null);
+  for (const subschema of subschemas) {
+    const { label, schema } = subschema;
+    const fragmentsForSubschema = Object.create(null);
+    for (const fragmentName of Object.keys(fragments)) {
+      const fragmentDetails = fragments[fragmentName];
+      const definition = fragmentDetails.definition;
+      const typeName = definition.typeCondition.name.value;
+      const parentType = schema.getType(typeName) as GraphQLCompositeType;
+      invariant(parentType != null);
+      const transformedFragment = {
+        ...fragmentDetails,
+        definition: {
+          ...definition,
+          selectionSet: transformSelectionSetForTargetSubschema(
+            definition.selectionSet,
+            fragments,
+            parentType,
+            schema,
+            prefix,
+          ),
+        },
+      };
+      fragmentsForSubschema[fragmentName] = transformedFragment;
+    }
+    fragmentsBySubschema[label] = fragmentsForSubschema;
+  }
+  return fragmentsBySubschema;
 }
 
 function buildPathSegmentTree(

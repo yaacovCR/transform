@@ -401,7 +401,7 @@ export default tsConfig(
       'no-restricted-syntax': [
         'error',
         {
-          selector: 'TemplateElement[value.raw=/ \\n/]',
+          selector: 'TemplateElement[value.raw=/ \\r?\\n/]',
           message:
             'String literals should not contain trailing spaces. If needed for tests please disable locally using eslint comment',
         },

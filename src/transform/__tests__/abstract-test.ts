@@ -454,6 +454,7 @@ describe('Execute: Handles execution of abstract types', () => {
       }
     `);
 
+    // NOTE: This is an *invalid* query, but it should be an *executable* query.
     const query = `
       {
         pets {
@@ -483,14 +484,17 @@ describe('Execute: Handles execution of abstract types', () => {
       ],
     };
 
-    // query invalid, unions do not have fields, so name skipped
+    // invalid fields are dropped during transformation prior to forwarding,
+    // ultimately resolving to null
     expect(await executeQuery({ schema, query, rootValue })).to.deep.equal({
       data: {
         pets: [
           {
+            name: null,
             woofs: true,
           },
           {
+            name: null,
             meows: false,
           },
         ],
