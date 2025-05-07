@@ -46,6 +46,7 @@ import type { LegacyExperimentalIncrementalExecutionResults } from './getLegacyP
 import { getLegacyPayloadPublisher } from './getLegacyPayloadPublisher.js';
 import { groupedFieldSetToSelectionSet } from './groupedFieldSetToSelectionSet.js';
 import { IncrementalPublisher } from './IncrementalPublisher.js';
+import { interpolateFragmentArguments } from './interpolateFragmentArguments.js';
 import { MergedResult } from './MergedResult.js';
 import type { PayloadPublisher } from './PayloadPublisher.js';
 import { transformSelectionSetForTargetSubschema } from './transformSelectionSetForTargetSubschema.js';
@@ -73,7 +74,10 @@ export function transform(
   | ExperimentalIncrementalExecutionResults
   | LegacyExperimentalIncrementalExecutionResults
 > {
-  const originalArgs = validateExecutionArgs(args);
+  const originalArgs = validateExecutionArgs({
+    ...args,
+    document: interpolateFragmentArguments(args.document),
+  });
 
   if (!('schema' in originalArgs)) {
     return { errors: originalArgs };

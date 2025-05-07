@@ -1190,7 +1190,7 @@ describe('Execute: Handles inputs', () => {
     });
   });
 
-  describe.skip('using fragment arguments', () => {
+  describe('using fragment arguments', () => {
     it('when there are no fragment arguments', () => {
       const result = executeQueryWithFragmentArguments(`
         query {
@@ -1235,9 +1235,14 @@ describe('Execute: Handles inputs', () => {
 
       expect(result).to.have.property('errors');
       expect(result.errors).to.have.length(1);
+      // Error message changes secondary to interpolation.
+      expect(result.errors?.at(0)?.message).to.match(
+        /Variable "\$missing_fragment_variable_/,
+      );
+      /*
       expect(result.errors?.at(0)?.message).to.match(
         /Argument "value" of required type "String!"/,
-      );
+      );*/
     });
 
     it('when the definition has a default and is provided', () => {
@@ -1301,11 +1306,15 @@ describe('Execute: Handles inputs', () => {
         }
       `);
 
+      expect(result).not.to.have.property('errors');
+
+      /** no errors secondary to interpolation
       expect(result).to.have.property('errors');
       expect(result.errors).to.have.length(1);
       expect(result.errors?.at(0)?.message).to.match(
         /Argument "value" has invalid value: Expected value of non-null type "String!" not to be null./,
       );
+      */
     });
 
     it('when the definition has no default and is not provided', () => {

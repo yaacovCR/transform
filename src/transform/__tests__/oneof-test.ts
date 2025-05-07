@@ -262,7 +262,7 @@ describe('Execute: Handles OneOf Input Objects', () => {
       });
     });
 
-    it.skip('errors with nulled fragment variable for field', () => {
+    it('errors with nulled fragment variable for field', () => {
       const query = `
         query {
           ...TestFragment(a: null)
@@ -285,7 +285,7 @@ describe('Execute: Handles OneOf Input Objects', () => {
             // A nullable variable in a oneOf field position would be caught at validation-time
             // hence the vague error message here.
             message:
-              'Argument "Query.test(input:)" has invalid value: Expected variable "$a" provided to field "a" for OneOf Input Object type "TestInputObject" not to be null.',
+              'Argument "Query.test(input:)" has invalid value at .a: Field "TestInputObject.a" used for OneOf Input Object must be non-null.',
             locations: [{ line: 6, column: 23 }],
             path: ['test'],
           },
@@ -316,7 +316,7 @@ describe('Execute: Handles OneOf Input Objects', () => {
             // A nullable variable in a oneOf field position would be caught at validation-time
             // hence the vague error message here.
             message:
-              'Argument "Query.test(input:)" has invalid value: Expected variable "$a" provided to field "a" for OneOf Input Object type "TestInputObject" to provide a runtime value.',
+              'Argument "Query.test(input:)" has invalid value: Expected variable "$missing_fragment_variable_a_0" provided to field "a" for OneOf Input Object type "TestInputObject" to provide a runtime value.',
             locations: [{ line: 6, column: 23 }],
             path: ['test'],
           },

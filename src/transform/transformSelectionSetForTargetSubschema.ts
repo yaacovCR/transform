@@ -57,6 +57,7 @@ export function transformSelectionSetForTargetSubschema(
         return null;
       }
       if (node.selectionSet) {
+        /* c8 ignore next 3 */
         if (node.selectionSet.selections.length === 0) {
           return null;
         }

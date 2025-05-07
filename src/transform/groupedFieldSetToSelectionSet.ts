@@ -40,16 +40,14 @@ export function groupedFieldSetToSelectionSet(
     };
 
     if (deferUsage) {
-      const args: Array<ArgumentNode> =
-        deferUsage.label !== undefined
-          ? [
-              {
-                kind: Kind.ARGUMENT,
-                name: { kind: Kind.NAME, value: 'label' },
-                value: { kind: Kind.STRING, value: deferUsage.label },
-              },
-            ]
-          : [];
+      const args: Array<ArgumentNode> = [];
+      if (deferUsage.label !== undefined) {
+        args.push({
+          kind: Kind.ARGUMENT,
+          name: { kind: Kind.NAME, value: 'label' },
+          value: { kind: Kind.STRING, value: deferUsage.label },
+        });
+      }
       directives.push({
         kind: Kind.DIRECTIVE,
         name: { kind: Kind.NAME, value: GraphQLDeferDirective.name },
