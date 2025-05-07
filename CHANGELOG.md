@@ -1,5 +1,13 @@
 # @yaacovcr/transform
 
+## 0.0.7
+
+### Patch Changes
+
+- d26e9ed: Switch from filtering of root fields to actual routing.
+
+  Each root field will now be sent to at most one subschema.
+
 ## 0.0.6
 
 ### Patch Changes
