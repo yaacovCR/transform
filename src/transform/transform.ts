@@ -18,6 +18,7 @@ import type { PromiseOrValue } from '../jsutils/PromiseOrValue.js';
 import { buildBranchingExecutionPlan } from './buildBranchingExecutionPlan.js';
 import type { DeferUsageSet, ExecutionPlan } from './buildExecutionPlan.js';
 import { buildExecutionPlan } from './buildExecutionPlan.js';
+import { buildRootFieldPlan } from './buildFieldPlan.js';
 import type {
   SubschemaConfig,
   Transformers,
@@ -32,7 +33,6 @@ import { IncrementalPublisher } from './IncrementalPublisher.js';
 import { interpolateFragmentArguments } from './interpolateFragmentArguments.js';
 import { MergedResult } from './MergedResult.js';
 import type { PayloadPublisher } from './PayloadPublisher.js';
-import { planRootFields } from './planFields.js';
 import type { DeferredFragment, IncrementalDataRecord } from './types.js';
 
 export interface TransformArgs extends ExecutionArgs {
@@ -121,7 +121,7 @@ export function transform(
     };
   }
 
-  const rootFieldPlan = planRootFields(context, superschemaRootType);
+  const rootFieldPlan = buildRootFieldPlan(context, superschemaRootType);
 
   const { plansBySubschema, newDeferUsages } = rootFieldPlan;
 

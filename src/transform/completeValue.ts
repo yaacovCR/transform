@@ -31,13 +31,13 @@ import {
 import { BoxedPromiseOrValue } from '../jsutils/BoxedPromiseOrValue.js';
 import { invariant } from '../jsutils/invariant.js';
 import { isObjectLike } from '../jsutils/isObjectLike.js';
-import { memoize3 } from '../jsutils/memoize3.js';
 import type { ObjMap } from '../jsutils/ObjMap.js';
 import type { Path } from '../jsutils/Path.js';
 import { addPath, pathToArray } from '../jsutils/Path.js';
 import type { PromiseOrValue } from '../jsutils/PromiseOrValue.js';
 
 import type { DeferUsageSet, ExecutionPlan } from './buildExecutionPlan.js';
+import { buildSubFieldPlan } from './buildFieldPlan.js';
 import type {
   FieldTransformer,
   LeafTransformer,
@@ -75,24 +75,6 @@ interface StreamUsage {
   label: string;
   initialCount: number;
 }
-
-const collectSubfields = memoize3(
-  (
-    context: TransformationContext,
-    returnType: GraphQLObjectType,
-    fieldDetailsList: ReadonlyArray<FieldDetails>,
-  ) => {
-    const { superschema, fragments, variableValues, hideSuggestions } = context;
-    return _collectSubfields(
-      superschema,
-      fragments,
-      variableValues,
-      returnType,
-      fieldDetailsList,
-      hideSuggestions,
-    );
-  },
-);
 
 // eslint-disable-next-line @typescript-eslint/max-params
 export function completeInitialResult(
@@ -264,7 +246,7 @@ function completeValue(
   invariant(isObjectType(runtimeType));
 
   const { groupedFieldSet: originalGroupedFieldSet, newDeferUsages } =
-    collectSubfields(context, runtimeType, fieldDetailsList);
+    buildSubFieldPlan(context, runtimeType, fieldDetailsList);
 
   const { groupedFieldSet, newGroupedFieldSets } = buildSubExecutionPlan(
     context,

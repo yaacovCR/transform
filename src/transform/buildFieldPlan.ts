@@ -14,13 +14,17 @@ import type {
   GroupedFieldSet,
   // eslint-disable-next-line n/no-missing-import
 } from 'graphql/execution/collectFields.js';
-// eslint-disable-next-line n/no-missing-import
-import { collectFields } from 'graphql/execution/collectFields.js';
+import {
+  collectFields,
+  collectSubfields,
+  // eslint-disable-next-line n/no-missing-import
+} from 'graphql/execution/collectFields.js';
 // eslint-disable-next-line n/no-missing-import
 import type { VariableValues } from 'graphql/execution/values.js';
 
 import { invariant } from '../jsutils/invariant.js';
 import { mapValue } from '../jsutils/mapValue.js';
+import { memoize3 } from '../jsutils/memoize3.js';
 import type { ObjMap } from '../jsutils/ObjMap.js';
 import type { PromiseOrValue } from '../jsutils/PromiseOrValue.js';
 
@@ -55,7 +59,7 @@ interface SubschemaPlan {
   >;
 }
 
-export function planRootFields(
+export function buildRootFieldPlan(
   context: PlanContext,
   rootType: GraphQLObjectType,
 ): RootFieldPlan {
@@ -163,4 +167,33 @@ function filterGroupedFieldSet(
     }
   }
   return filteredMap;
+}
+
+const _collectSubfields = memoize3(
+  (
+    context: PlanContext,
+    returnType: GraphQLObjectType,
+    fieldDetailsList: ReadonlyArray<FieldDetails>,
+  ) => {
+    const { superschema, fragments, variableValues, hideSuggestions } = context;
+    return collectSubfields(
+      superschema,
+      fragments,
+      variableValues,
+      returnType,
+      fieldDetailsList,
+      hideSuggestions,
+    );
+  },
+);
+
+export function buildSubFieldPlan(
+  context: PlanContext,
+  returnType: GraphQLObjectType,
+  fieldDetailsList: ReadonlyArray<FieldDetails>,
+): {
+  groupedFieldSet: GroupedFieldSet;
+  newDeferUsages: ReadonlyArray<DeferUsage>;
+} {
+  return _collectSubfields(context, returnType, fieldDetailsList);
 }
