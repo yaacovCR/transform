@@ -69,6 +69,7 @@ export interface TransformationContext {
   fragmentsBySubschema: ObjMap<ObjMap<FragmentDetails>>;
   variableValues: VariableValues;
   hideSuggestions: boolean;
+  originalArgs: ValidatedExecutionArgs;
   originalLabels: Map<string, string | undefined>;
   pathSegmentRootNode: PathSegmentNode;
   objectFieldTransformers: ObjectFieldTransformers;
@@ -121,6 +122,7 @@ export function buildTransformationContext(
     ),
     variableValues,
     hideSuggestions,
+    originalArgs,
     originalLabels,
     objectFieldTransformers,
     pathSegmentRootNode: buildPathSegmentTree(pathScopedFieldTransformers),
