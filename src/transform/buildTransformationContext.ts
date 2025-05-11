@@ -23,13 +23,13 @@ import type { Path } from '../jsutils/Path.js';
 import type { PromiseOrValue } from '../jsutils/PromiseOrValue.js';
 
 import { addNewLabels } from './addNewLabels.js';
-import type { DeferUsageSet, ExecutionPlan } from './buildExecutionPlan.js';
+import type { DeferPlan, DeferUsageSet } from './buildDeferPlan.js';
 import { transformSelectionSetForTargetSubschema } from './transformSelectionSetForTargetSubschema.js';
 
-export type ExecutionPlanBuilder = (
+export type DeferPlanBuilder = (
   originalGroupedFieldSet: GroupedFieldSet,
   parentDeferUsages?: DeferUsageSet,
-) => ExecutionPlan;
+) => DeferPlan;
 
 export type FieldTransformer = (
   value: unknown,
@@ -74,7 +74,7 @@ export interface TransformationContext {
   pathSegmentRootNode: PathSegmentNode;
   objectFieldTransformers: ObjectFieldTransformers;
   leafTransformers: LeafTransformers;
-  executionPlanBuilder: ExecutionPlanBuilder;
+  deferPlanBuilder: DeferPlanBuilder;
   prefix: string;
 }
 
@@ -92,7 +92,7 @@ export function buildTransformationContext(
   originalArgs: ValidatedExecutionArgs,
   subschemas: ReadonlyArray<SubschemaConfig>,
   transformers: Transformers,
-  executionPlanBuilder: ExecutionPlanBuilder,
+  deferPlanBuilder: DeferPlanBuilder,
   prefix: string,
 ): TransformationContext {
   const { operation, fragments } = originalArgs;
@@ -127,7 +127,7 @@ export function buildTransformationContext(
     objectFieldTransformers,
     pathSegmentRootNode: buildPathSegmentTree(pathScopedFieldTransformers),
     leafTransformers,
-    executionPlanBuilder,
+    deferPlanBuilder,
     prefix,
   };
 }

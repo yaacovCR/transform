@@ -15,9 +15,9 @@ import { isPromise } from '../jsutils/isPromise.js';
 import type { ObjMap } from '../jsutils/ObjMap.js';
 import type { PromiseOrValue } from '../jsutils/PromiseOrValue.js';
 
-import { buildBranchingExecutionPlan } from './buildBranchingExecutionPlan.js';
-import type { DeferUsageSet, ExecutionPlan } from './buildExecutionPlan.js';
-import { buildExecutionPlan } from './buildExecutionPlan.js';
+import { buildBranchingDeferPlan } from './buildBranchingDeferPlan.js';
+import type { DeferPlan, DeferUsageSet } from './buildDeferPlan.js';
+import { buildDeferPlan } from './buildDeferPlan.js';
 import { buildRootFieldPlan } from './buildFieldPlan.js';
 import type {
   SubschemaConfig,
@@ -79,23 +79,23 @@ export function transform(
   } = args;
 
   let payloadPublisher: PayloadPublisher<any, any>;
-  let executionPlanBuilder: (
+  let deferPlanBuilder: (
     originalGroupedFieldSet: GroupedFieldSet,
     parentDeferUsages?: DeferUsageSet,
-  ) => ExecutionPlan;
+  ) => DeferPlan;
   if (useLegacyIncremental) {
     payloadPublisher = getLegacyPayloadPublisher();
-    executionPlanBuilder = buildBranchingExecutionPlan;
+    deferPlanBuilder = buildBranchingDeferPlan;
   } else {
     payloadPublisher = getDefaultPayloadPublisher();
-    executionPlanBuilder = buildExecutionPlan;
+    deferPlanBuilder = buildDeferPlan;
   }
 
   const context = buildTransformationContext(
     originalArgs,
     subschemas,
     transformers,
-    executionPlanBuilder,
+    deferPlanBuilder,
     prefix,
   );
 
@@ -132,7 +132,7 @@ export function transform(
       continue;
     }
 
-    const { groupedFieldSet, executor } = subschemaPlan;
+    const { groupedFieldSet, newGroupedFieldSets, executor } = subschemaPlan;
 
     const originalResult = executor();
 
@@ -145,7 +145,8 @@ export function transform(
             superschemaRootType,
             groupedFieldSet,
             newDeferUsages,
-            subschemaConfig.label,
+            newGroupedFieldSets,
+            subschemaConfig,
             resolved,
             mergedResult,
           ),
@@ -158,7 +159,8 @@ export function transform(
       superschemaRootType,
       groupedFieldSet,
       newDeferUsages,
-      subschemaConfig.label,
+      newGroupedFieldSets,
+      subschemaConfig,
       originalResult,
       mergedResult,
     );

@@ -9,12 +9,12 @@ import { AccumulatorMap } from '../jsutils/AccumulatorMap.js';
 import { getBySet } from '../jsutils/getBySet.js';
 import { isSameSet } from '../jsutils/isSameSet.js';
 
-import type { DeferUsageSet, ExecutionPlan } from './buildExecutionPlan.js';
+import type { DeferPlan, DeferUsageSet } from './buildDeferPlan.js';
 
-export function buildBranchingExecutionPlan(
+export function buildBranchingDeferPlan(
   originalGroupedFieldSet: GroupedFieldSet,
   parentDeferUsages: DeferUsageSet = new Set<DeferUsage>(),
-): ExecutionPlan {
+): DeferPlan {
   const groupedFieldSet = new AccumulatorMap<string, FieldDetails>();
 
   const newGroupedFieldSets = new Map<
