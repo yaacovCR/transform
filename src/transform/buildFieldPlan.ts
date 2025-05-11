@@ -65,7 +65,7 @@ interface RootFieldPlan {
   newDeferUsages: ReadonlyArray<DeferUsage>;
 }
 
-interface SubschemaPlan {
+export interface SubschemaPlan {
   groupedFieldSet: GroupedFieldSet;
   newGroupedFieldSets: Map<DeferUsageSet, GroupedFieldSet>;
   executor: () => PromiseOrValue<

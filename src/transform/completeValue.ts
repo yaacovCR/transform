@@ -37,6 +37,7 @@ import { addPath, pathToArray } from '../jsutils/Path.js';
 import type { PromiseOrValue } from '../jsutils/PromiseOrValue.js';
 
 import type { DeferUsageSet } from './buildDeferPlan.js';
+import type { SubschemaPlan } from './buildFieldPlan.js';
 import { buildSubfieldPlan } from './buildFieldPlan.js';
 import type {
   FieldTransformer,
@@ -70,6 +71,7 @@ interface IncrementalContext {
   originalErrors: Array<GraphQLError>;
   deferredFragments: Array<DeferredFragment>;
   incrementalDataRecords: Array<IncrementalDataRecord>;
+  collectedPlans: Map<PathSegmentNode, Map<SubschemaConfig, SubschemaPlan>>;
 }
 
 interface StreamUsage {
@@ -103,6 +105,7 @@ export function completeInitialResult(
     originalErrors: [],
     deferredFragments: [],
     incrementalDataRecords: [],
+    collectedPlans: new Map(),
   };
 
   const newDeferMap = getNewDeferMap(
@@ -247,14 +250,18 @@ function completeValue(
 
   invariant(isObjectType(runtimeType));
 
-  const { groupedFieldSet, newGroupedFieldSets, newDeferUsages } =
-    buildSubfieldPlan(
-      context,
-      runtimeType,
-      fieldDetailsList,
-      subschemaConfig,
-      incrementalContext.deferUsageSet,
-    );
+  const {
+    groupedFieldSet,
+    newDeferUsages,
+    newGroupedFieldSets,
+    plansBySubschema,
+  } = buildSubfieldPlan(
+    context,
+    runtimeType,
+    fieldDetailsList,
+    subschemaConfig,
+    incrementalContext.deferUsageSet,
+  );
 
   const newDeferMap = getNewDeferMap(
     context,
@@ -287,6 +294,10 @@ function completeValue(
     subschemaConfig,
     newDeferMap,
   );
+
+  if (pathSegmentNode && plansBySubschema.size > 0) {
+    incrementalContext.collectedPlans.set(pathSegmentNode, plansBySubschema);
+  }
 
   return completed;
 }
@@ -584,6 +595,7 @@ function collectExecutionGroups(
             originalErrors: [],
             deferredFragments: [],
             incrementalDataRecords: [],
+            collectedPlans: new Map(),
           },
           subschemaConfig,
           deferMap,
@@ -745,6 +757,7 @@ function maybeAddStream(
           originalErrors: [],
           deferredFragments: [],
           incrementalDataRecords: [],
+          collectedPlans: new Map(),
         },
         subschemaConfig,
       ),
