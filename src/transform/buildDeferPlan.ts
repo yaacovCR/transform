@@ -10,15 +10,15 @@ import { isSameSet } from '../jsutils/isSameSet.js';
 
 export type DeferUsageSet = ReadonlySet<DeferUsage>;
 
-export interface ExecutionPlan {
+export interface DeferPlan {
   groupedFieldSet: GroupedFieldSet;
   newGroupedFieldSets: Map<DeferUsageSet, GroupedFieldSet>;
 }
 
-export function buildExecutionPlan(
+export function buildDeferPlan(
   originalGroupedFieldSet: GroupedFieldSet,
   parentDeferUsages: DeferUsageSet = new Set<DeferUsage>(),
-): ExecutionPlan {
+): DeferPlan {
   const groupedFieldSet = new Map<string, FieldDetailsList>();
   const newGroupedFieldSets = new Map<
     DeferUsageSet,
