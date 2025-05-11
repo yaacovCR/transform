@@ -31,7 +31,7 @@ import type { LegacyExperimentalIncrementalExecutionResults } from './getLegacyP
 import { getLegacyPayloadPublisher } from './getLegacyPayloadPublisher.js';
 import { IncrementalPublisher } from './IncrementalPublisher.js';
 import { interpolateFragmentArguments } from './interpolateFragmentArguments.js';
-import { MergedResult } from './MergedResult.js';
+import type { MergedResult } from './MergedResult.js';
 import type { PayloadPublisher } from './PayloadPublisher.js';
 import type { DeferredFragment, IncrementalDataRecord } from './types.js';
 
@@ -99,7 +99,6 @@ export function transform(
     prefix,
   );
 
-  const mergedResult = new MergedResult();
   const transformedResults: Array<
     PromiseOrValue<ExecutionResult | CompletedInitialResult>
   > = [];
@@ -121,9 +120,10 @@ export function transform(
     };
   }
 
-  const rootFieldPlan = buildRootFieldPlan(context, superschemaRootType);
-
-  const { plansBySubschema, newDeferUsages } = rootFieldPlan;
+  const { plansBySubschema, newDeferUsages } = buildRootFieldPlan(
+    context,
+    superschemaRootType,
+  );
 
   let containsPromise = false;
   for (const subschemaConfig of Object.values(subschemas)) {
@@ -148,7 +148,6 @@ export function transform(
             newGroupedFieldSets,
             subschemaConfig,
             resolved,
-            mergedResult,
           ),
         ),
       );
@@ -162,7 +161,6 @@ export function transform(
       newGroupedFieldSets,
       subschemaConfig,
       originalResult,
-      mergedResult,
     );
     // TODO: add test case for asynchronous transform
     /* c8 ignore next 3 */
@@ -174,13 +172,13 @@ export function transform(
 
   if (containsPromise) {
     return Promise.all(transformedResults).then((resolved) =>
-      buildResponse(resolved, mergedResult, payloadPublisher),
+      buildResponse(resolved, context.mergedResult, payloadPublisher),
     );
   }
 
   return buildResponse(
     transformedResults as Array<ExecutionResult | CompletedInitialResult>,
-    mergedResult,
+    context.mergedResult,
     payloadPublisher,
   );
 }

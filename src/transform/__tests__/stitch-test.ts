@@ -14,52 +14,55 @@ import { describe, it } from 'mocha';
 import { expectJSON } from '../../__testUtils__/expectJSON.js';
 
 import { invariant } from '../../jsutils/invariant.js';
+import type { ObjMap } from '../../jsutils/ObjMap.js';
 
 import type { SubschemaConfig } from '../buildTransformationContext.js';
 import { transform } from '../transform.js';
 
-const subschemaA = new GraphQLSchema({
-  query: new GraphQLObjectType({
-    name: 'Query',
-    fields: () => ({
-      fieldA: {
-        type: GraphQLString,
-        resolve: () => 'valueA',
-      },
-    }),
+const queryA: GraphQLObjectType = new GraphQLObjectType({
+  name: 'Query',
+  fields: () => ({
+    fieldA: { type: GraphQLString },
+    nested: { type: queryA },
   }),
+});
+
+const subschemaA = new GraphQLSchema({
+  query: queryA,
 });
 
 const subschemaB = new GraphQLSchema({
   query: new GraphQLObjectType({
     name: 'Query',
     fields: () => ({
-      fieldB: {
-        type: GraphQLString,
-        resolve: () => 'valueB',
-      },
-    }),
-  }),
-});
-
-const superSchema = new GraphQLSchema({
-  query: new GraphQLObjectType({
-    name: 'Query',
-    fields: () => ({
-      fieldA: { type: GraphQLString },
       fieldB: { type: GraphQLString },
     }),
   }),
 });
 
+const query: GraphQLObjectType = new GraphQLObjectType({
+  name: 'Query',
+  fields: () => ({
+    fieldA: { type: GraphQLString },
+    fieldB: { type: GraphQLString },
+    nested: { type: query },
+  }),
+});
+
+const superSchema = new GraphQLSchema({
+  query,
+});
+
 async function complete(
   document: DocumentNode,
   subschemaConfigs: ReadonlyArray<SubschemaConfig>,
+  rootValue: ObjMap<unknown> = {},
 ) {
   const result = await transform({
     schema: superSchema,
     document,
     subschemas: subschemaConfigs,
+    rootValue,
   });
 
   invariant('initialResult' in result);
@@ -86,6 +89,10 @@ describe('stitching', () => {
       schema: superSchema,
       document,
       subschemas: subschemaConfigs,
+      rootValue: {
+        fieldA: 'valueA',
+        fieldB: 'valueB',
+      },
     });
 
     expectJSON(result).toDeepEqual({
@@ -109,7 +116,10 @@ describe('stitching', () => {
       { label: 'subschemaB', schema: subschemaB },
     ];
 
-    const result = await complete(document, subschemaConfigs);
+    const result = await complete(document, subschemaConfigs, {
+      fieldA: 'valueA',
+      fieldB: 'valueB',
+    });
 
     expectJSON(result).toDeepEqual([
       {
@@ -141,5 +151,65 @@ describe('stitching', () => {
         hasNext: false,
       },
     ]);
+  });
+
+  it('merges subfields from multiple subschemas', () => {
+    const document: DocumentNode = parse('{ nested { fieldA fieldB } }');
+
+    const subschemaConfigs: ReadonlyArray<SubschemaConfig> = [
+      { label: 'subschemaA', schema: subschemaA },
+      { label: 'subschemaB', schema: subschemaB },
+    ];
+
+    const result = transform({
+      schema: superSchema,
+      document,
+      subschemas: subschemaConfigs,
+      rootValue: {
+        nested: {
+          fieldA: 'valueA',
+        },
+        fieldB: 'valueB',
+      },
+    });
+
+    expectJSON(result).toDeepEqual({
+      data: {
+        nested: {
+          fieldA: 'valueA',
+          fieldB: 'valueB',
+        },
+      },
+    });
+  });
+
+  it('merges async subfields from multiple subschemas', async () => {
+    const document: DocumentNode = parse('{ nested { fieldA fieldB } }');
+
+    const subschemaConfigs: ReadonlyArray<SubschemaConfig> = [
+      { label: 'subschemaA', schema: subschemaA },
+      { label: 'subschemaB', schema: subschemaB },
+    ];
+
+    const result = await transform({
+      schema: superSchema,
+      document,
+      subschemas: subschemaConfigs,
+      rootValue: {
+        nested: {
+          fieldA: Promise.resolve('valueA'),
+        },
+        fieldB: Promise.resolve('valueB'),
+      },
+    });
+
+    expectJSON(result).toDeepEqual({
+      data: {
+        nested: {
+          fieldA: 'valueA',
+          fieldB: 'valueB',
+        },
+      },
+    });
   });
 });

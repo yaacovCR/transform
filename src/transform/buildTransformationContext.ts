@@ -24,6 +24,7 @@ import type { PromiseOrValue } from '../jsutils/PromiseOrValue.js';
 
 import { addNewLabels } from './addNewLabels.js';
 import type { DeferPlan, DeferUsageSet } from './buildDeferPlan.js';
+import { MergedResult } from './MergedResult.js';
 import { transformSelectionSetForTargetSubschema } from './transformSelectionSetForTargetSubschema.js';
 
 export type DeferPlanBuilder = (
@@ -76,6 +77,7 @@ export interface TransformationContext {
   leafTransformers: LeafTransformers;
   deferPlanBuilder: DeferPlanBuilder;
   prefix: string;
+  mergedResult: MergedResult;
 }
 
 export interface SubschemaConfig {
@@ -129,6 +131,7 @@ export function buildTransformationContext(
     leafTransformers,
     deferPlanBuilder,
     prefix,
+    mergedResult: new MergedResult(),
   };
 }
 

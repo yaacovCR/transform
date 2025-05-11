@@ -31,6 +31,7 @@ import {
 import { BoxedPromiseOrValue } from '../jsutils/BoxedPromiseOrValue.js';
 import { invariant } from '../jsutils/invariant.js';
 import { isObjectLike } from '../jsutils/isObjectLike.js';
+import { isPromise } from '../jsutils/isPromise.js';
 import type { ObjMap } from '../jsutils/ObjMap.js';
 import type { Path } from '../jsutils/Path.js';
 import { addPath, pathToArray } from '../jsutils/Path.js';
@@ -48,7 +49,6 @@ import type {
 } from './buildTransformationContext.js';
 import { EmbeddedErrors } from './EmbeddedError.js';
 import { filter } from './filter.js';
-import type { MergedResult } from './MergedResult.js';
 import type {
   DeferredFragment,
   ExecutionGroupResult,
@@ -71,7 +71,15 @@ interface IncrementalContext {
   originalErrors: Array<GraphQLError>;
   deferredFragments: Array<DeferredFragment>;
   incrementalDataRecords: Array<IncrementalDataRecord>;
-  collectedPlans: Map<PathSegmentNode, Map<SubschemaConfig, SubschemaPlan>>;
+  encounteredPlans: Map<Path, EncounteredPlan>;
+}
+
+interface EncounteredPlan {
+  plansBySubschema: Map<SubschemaConfig, SubschemaPlan>;
+  complete: (
+    subschemaConfig: SubschemaConfig,
+    result: ExecutionResult | ExperimentalIncrementalExecutionResults,
+  ) => void;
 }
 
 interface StreamUsage {
@@ -88,8 +96,8 @@ export function completeInitialResult(
   newGroupedFieldSets: Map<DeferUsageSet, GroupedFieldSet>,
   subschemaConfig: SubschemaConfig,
   originalResult: ExecutionResult | ExperimentalIncrementalExecutionResults,
-  mergedResult: MergedResult,
 ): ExecutionResult | PromiseOrValue<CompletedInitialResult> {
+  const mergedResult = context.mergedResult;
   mergedResult.add(subschemaConfig.label, originalResult);
   const originalData = mergedResult.getMergedData();
   if (originalData instanceof EmbeddedErrors) {
@@ -105,7 +113,7 @@ export function completeInitialResult(
     originalErrors: [],
     deferredFragments: [],
     incrementalDataRecords: [],
-    collectedPlans: new Map(),
+    encounteredPlans: new Map(),
   };
 
   const newDeferMap = getNewDeferMap(
@@ -116,9 +124,10 @@ export function completeInitialResult(
 
   const pathSegmentRootNode = context.pathSegmentRootNode;
 
-  const completed = completeObjectValue(
+  const completed = completeObjectValueCollectingExecutionGroups(
     context,
     groupedFieldSet,
+    newGroupedFieldSets,
     rootType,
     originalData,
     undefined,
@@ -128,19 +137,38 @@ export function completeInitialResult(
     newDeferMap,
   );
 
-  collectExecutionGroups(
-    context,
-    rootType,
-    originalData,
-    undefined,
-    pathSegmentRootNode,
-    newGroupedFieldSets,
-    incrementalContext,
-    subschemaConfig,
-    newDeferMap,
-  );
+  const promises = executeSubschemaPlans(incrementalContext.encounteredPlans);
+
+  if (promises.length > 0) {
+    return Promise.all(promises).then(() =>
+      buildInitialResult(incrementalContext, completed),
+    );
+  }
 
   return buildInitialResult(incrementalContext, completed);
+}
+
+function executeSubschemaPlans(
+  encounteredPlans: Map<Path, EncounteredPlan>,
+): Array<Promise<void>> {
+  const promises: Array<Promise<void>> = [];
+  for (const [, encounteredPlan] of encounteredPlans) {
+    const { plansBySubschema, complete } = encounteredPlan;
+    for (const [subschemaConfig, subschemaPlan] of plansBySubschema) {
+      const { executor } = subschemaPlan;
+      const result = executor();
+      if (isPromise(result)) {
+        promises.push(
+          result.then((resolved) => {
+            complete(subschemaConfig, resolved);
+          }),
+        );
+        continue;
+      }
+      complete(subschemaConfig, result);
+    }
+  }
+  return promises;
 }
 
 function buildInitialResult(
@@ -271,35 +299,82 @@ function completeValue(
     path,
   );
 
-  const completed = completeObjectValue(
+  const completed = completeObjectValueCollectingExecutionGroups(
     context,
     groupedFieldSet,
-    runtimeType,
-    result,
-    path,
-    pathSegmentNode,
-    incrementalContext,
-    subschemaConfig,
-    newDeferMap,
-  );
-
-  collectExecutionGroups(
-    context,
-    runtimeType,
-    result,
-    path,
-    pathSegmentNode,
     newGroupedFieldSets,
+    runtimeType,
+    result,
+    path,
+    pathSegmentNode,
     incrementalContext,
     subschemaConfig,
     newDeferMap,
   );
 
-  if (pathSegmentNode && plansBySubschema.size > 0) {
-    incrementalContext.collectedPlans.set(pathSegmentNode, plansBySubschema);
+  if (plansBySubschema.size > 0) {
+    incrementalContext.encounteredPlans.set(path, {
+      plansBySubschema,
+      complete: (
+        additionalSubschemaConfig: SubschemaConfig,
+        newResult: ExecutionResult | ExperimentalIncrementalExecutionResults,
+      ) =>
+        completeSubschemaObjectValue(
+          context,
+          runtimeType,
+          plansBySubschema,
+          result,
+          newResult,
+          path,
+          pathSegmentNode,
+          incrementalContext,
+          additionalSubschemaConfig,
+          newDeferMap,
+          completed,
+        ),
+    });
   }
 
   return completed;
+}
+
+// eslint-disable-next-line @typescript-eslint/max-params
+function completeSubschemaObjectValue(
+  context: TransformationContext,
+  runtimeType: GraphQLObjectType,
+  plansBySubschema: Map<SubschemaConfig, SubschemaPlan>,
+  originalData: ObjMap<unknown>,
+  newResult: ExecutionResult | ExperimentalIncrementalExecutionResults,
+  path: Path | undefined,
+  pathSegmentNode: PathSegmentNode | undefined,
+  incrementalContext: IncrementalContext,
+  subschemaConfig: SubschemaConfig,
+  deferMap: ReadonlyMap<DeferUsage, DeferredFragment>,
+  originalCompleted: ObjMap<unknown>,
+): void {
+  context.mergedResult.add(subschemaConfig.label, newResult, originalData);
+
+  const subschemaPlan = plansBySubschema.get(subschemaConfig);
+  invariant(subschemaPlan !== undefined);
+
+  const {
+    groupedFieldSet: additionalGroupedFieldSet,
+    newGroupedFieldSets: additionalNewGroupedFieldSets,
+  } = subschemaPlan;
+
+  completeObjectValueCollectingExecutionGroups(
+    context,
+    additionalGroupedFieldSet,
+    additionalNewGroupedFieldSets,
+    runtimeType,
+    originalData,
+    path,
+    pathSegmentNode,
+    incrementalContext,
+    subschemaConfig,
+    deferMap,
+    originalCompleted,
+  );
 }
 
 // eslint-disable-next-line @typescript-eslint/max-params
@@ -348,6 +423,48 @@ function handleRawError(
 }
 
 // eslint-disable-next-line @typescript-eslint/max-params
+function completeObjectValueCollectingExecutionGroups(
+  context: TransformationContext,
+  groupedFieldSet: GroupedFieldSet,
+  newGroupedFieldSets: Map<DeferUsageSet, GroupedFieldSet>,
+  runtimeType: GraphQLObjectType,
+  originalData: ObjMap<unknown>,
+  path: Path | undefined,
+  pathSegmentNode: PathSegmentNode | undefined,
+  incrementalContext: IncrementalContext,
+  subschemaConfig: SubschemaConfig,
+  deferMap: ReadonlyMap<DeferUsage, DeferredFragment>,
+  completedObject = Object.create(null),
+): ObjMap<unknown> {
+  const completed = completeObjectValue(
+    context,
+    groupedFieldSet,
+    runtimeType,
+    originalData,
+    path,
+    pathSegmentNode,
+    incrementalContext,
+    subschemaConfig,
+    deferMap,
+    completedObject,
+  );
+
+  collectExecutionGroups(
+    context,
+    runtimeType,
+    originalData,
+    path,
+    pathSegmentNode,
+    newGroupedFieldSets,
+    incrementalContext,
+    subschemaConfig,
+    deferMap,
+  );
+
+  return completed;
+}
+
+// eslint-disable-next-line @typescript-eslint/max-params
 function completeObjectValue(
   context: TransformationContext,
   groupedFieldSet: GroupedFieldSet,
@@ -358,9 +475,9 @@ function completeObjectValue(
   incrementalContext: IncrementalContext,
   subschemaConfig: SubschemaConfig,
   deferMap: ReadonlyMap<DeferUsage, DeferredFragment> | undefined,
+  completedObject = Object.create(null),
 ): ObjMap<unknown> {
   const superschema = context.superschema;
-  const completedObject = Object.create(null);
 
   const objectFieldTransformers =
     context.objectFieldTransformers[runtimeType.name];
@@ -595,7 +712,7 @@ function collectExecutionGroups(
             originalErrors: [],
             deferredFragments: [],
             incrementalDataRecords: [],
-            collectedPlans: new Map(),
+            encounteredPlans: new Map(),
           },
           subschemaConfig,
           deferMap,
@@ -757,7 +874,7 @@ function maybeAddStream(
           originalErrors: [],
           deferredFragments: [],
           incrementalDataRecords: [],
-          collectedPlans: new Map(),
+          encounteredPlans: new Map(),
         },
         subschemaConfig,
       ),

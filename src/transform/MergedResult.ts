@@ -74,6 +74,7 @@ export class MergedResult {
   add(
     subschemaLabel: string,
     result: ExecutionResult | ExperimentalIncrementalExecutionResults,
+    mergePoint = this._mergedResult,
   ): void {
     let data;
     let errors;
@@ -90,9 +91,9 @@ export class MergedResult {
 
     // TODO: add test case
     /* c8 ignore next 6 */
-    if (this._mergedResult instanceof EmbeddedErrors) {
+    if (mergePoint instanceof EmbeddedErrors) {
       if (errors) {
-        this._mergedResult.errors.push(...errors);
+        mergePoint.errors.push(...errors);
       }
       return;
     }
@@ -104,7 +105,7 @@ export class MergedResult {
     }
 
     embedErrors(data, errors);
-    Object.assign(this._mergedResult, data);
+    Object.assign(mergePoint, data);
 
     if (subsequentResults) {
       this._events.add(
