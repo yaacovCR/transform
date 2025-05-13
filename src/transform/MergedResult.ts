@@ -74,7 +74,7 @@ export class MergedResult {
   add(
     subschemaLabel: string,
     result: ExecutionResult | ExperimentalIncrementalExecutionResults,
-    mergePoint = this._mergedResult,
+    path: ReadonlyArray<string | number> = [],
   ): void {
     let data;
     let errors;
@@ -88,6 +88,19 @@ export class MergedResult {
     } else {
       ({ data, errors } = result);
     }
+
+    // TODO: add test case
+    /* c8 ignore next 6 */
+    if (this._mergedResult instanceof EmbeddedErrors) {
+      if (errors) {
+        this._mergedResult.errors.push(...errors);
+      }
+      return;
+    }
+
+    const mergePoint = path.length
+      ? getObjectAtPath(this._mergedResult, path)
+      : this._mergedResult;
 
     // TODO: add test case
     /* c8 ignore next 6 */
@@ -110,13 +123,13 @@ export class MergedResult {
     if (subsequentResults) {
       this._events.add(
         mapAsyncIterable(subsequentResults, (subsequentResult) =>
-          this._processSubsequentResult(subschemaLabel, subsequentResult),
+          this._processSubsequentResult(subschemaLabel, subsequentResult, path),
         ),
       );
     }
     if (pending) {
       const pendingById = this._getPendingById(subschemaLabel, pending);
-      this._keyPendingResults(pendingById);
+      this._keyPendingResults(pendingById, path);
     }
   }
 
@@ -135,6 +148,7 @@ export class MergedResult {
   private _processSubsequentResult(
     subschemaLabel: string,
     subsequentIncrementalExecutionResult: SubsequentIncrementalExecutionResult,
+    pathPrefix: ReadonlyArray<string | number>,
   ): SubsequentResultEvents {
     const { pending, incremental, completed } =
       subsequentIncrementalExecutionResult;
@@ -155,13 +169,14 @@ export class MergedResult {
         subschemaLabel,
         incremental,
         pendingById,
+        pathPrefix,
       );
       streamsWithNewItems.forEach((key) => events.streamsWithNewItems.add(key));
     }
 
     // Key any *new* pending results that arrived in this payload
     if (pendingById) {
-      this._keyPendingResults(pendingById);
+      this._keyPendingResults(pendingById, pathPrefix);
     }
 
     if (completed) {
@@ -190,18 +205,22 @@ export class MergedResult {
     return pendingById;
   }
 
-  private _keyPendingResults(pendingById: Map<string, PendingResult>): void {
+  private _keyPendingResults(
+    pendingById: Map<string, PendingResult>,
+    pathPrefix: ReadonlyArray<string | number>,
+  ): void {
     pendingById.forEach((pendingResult, id) =>
-      this._keyPendingResult(id, pendingResult),
+      this._keyPendingResult(id, pendingResult, pathPrefix),
     );
   }
 
   private _keyPendingResult(
     id: string,
     pendingResult: PendingResult,
+    pathPrefix: ReadonlyArray<string | number>,
   ): KeyedPendingResult {
     invariant(!(this._mergedResult instanceof EmbeddedErrors));
-    const path = pendingResult.path;
+    const path = [...pathPrefix, ...pendingResult.path];
     const incompleteAtPath = getObjectAtPath(this._mergedResult, path);
     let key: string;
     let keyedPendingResult: KeyedPendingResult;
@@ -278,11 +297,16 @@ export class MergedResult {
     subschemaLabel: string,
     incrementalResults: ReadonlyArray<IncrementalResult>,
     pendingById: Map<string, PendingResult> | undefined,
+    pathPrefix: ReadonlyArray<string | number>,
   ): Set<string> {
     const streams = new Set<string>();
     for (const incrementalResult of incrementalResults) {
       const id = `${subschemaLabel}:${incrementalResult.id}`;
-      const keyedPendingResult = this._getKeyedPendingResult(id, pendingById);
+      const keyedPendingResult = this._getKeyedPendingResult(
+        id,
+        pendingById,
+        pathPrefix,
+      );
 
       if (isKeyedStream(keyedPendingResult)) {
         invariant('items' in incrementalResult);
@@ -317,6 +341,7 @@ export class MergedResult {
   private _getKeyedPendingResult(
     id: string,
     pendingById: Map<string, PendingResult> | undefined,
+    pathPrefix: ReadonlyArray<string | number>,
   ): KeyedPendingResult {
     const keyedPendingResult = this._keyedPendingResults.get(id);
     if (keyedPendingResult !== undefined) {
@@ -329,6 +354,6 @@ export class MergedResult {
 
     // This handles the case where an incremental result arrives *before*
     // its corresponding pending result in the same payload.
-    return this._keyPendingResult(id, pendingResult);
+    return this._keyPendingResult(id, pendingResult, pathPrefix);
   }
 }
