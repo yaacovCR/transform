@@ -212,4 +212,58 @@ describe('stitching', () => {
       },
     });
   });
+
+  it('merges deferred subfields from multiple subschemas', async () => {
+    const document: DocumentNode = parse(`
+      query {
+        nested {
+          ... @defer { fieldA }
+          ... @defer { fieldB }
+        }
+      }
+    `);
+
+    const subschemaConfigs: ReadonlyArray<SubschemaConfig> = [
+      { label: 'subschemaA', schema: subschemaA },
+      { label: 'subschemaB', schema: subschemaB },
+    ];
+
+    const result = await complete(document, subschemaConfigs, {
+      nested: {
+        fieldA: 'valueA',
+      },
+      fieldB: 'valueB',
+    });
+
+    expectJSON(result).toDeepEqual([
+      {
+        data: { nested: {} },
+        pending: [
+          { id: '0', path: ['nested'] },
+          { id: '1', path: ['nested'] },
+        ],
+        hasNext: true,
+      },
+      {
+        incremental: [
+          {
+            data: { fieldA: 'valueA' },
+            id: '0',
+          },
+        ],
+        completed: [{ id: '0' }],
+        hasNext: true,
+      },
+      {
+        incremental: [
+          {
+            data: { fieldB: 'valueB' },
+            id: '1',
+          },
+        ],
+        completed: [{ id: '1' }],
+        hasNext: false,
+      },
+    ]);
+  });
 });

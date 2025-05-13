@@ -352,7 +352,7 @@ function completeSubschemaObjectValue(
   deferMap: ReadonlyMap<DeferUsage, DeferredFragment>,
   originalCompleted: ObjMap<unknown>,
 ): void {
-  context.mergedResult.add(subschemaConfig.label, newResult, originalData);
+  context.mergedResult.add(subschemaConfig.label, newResult, pathToArray(path));
 
   const subschemaPlan = plansBySubschema.get(subschemaConfig);
   invariant(subschemaPlan !== undefined);
