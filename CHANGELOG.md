@@ -1,5 +1,11 @@
 # @yaacovcr/transform
 
+## 0.0.8
+
+### Patch Changes
+
+- 33afa86: add demo of ability to stitch subfields
+
 ## 0.0.7
 
 ### Patch Changes
